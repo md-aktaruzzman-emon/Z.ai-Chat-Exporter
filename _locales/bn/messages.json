@@ -1,0 +1,122 @@
+{
+  "extName": {
+    "message": "জেড.এআই চ্যাট এক্সপোর্টার",
+    "description": "The extension name in Bengali"
+  },
+  "extDesc": {
+    "message": "কোনো প্রকার বাহ্যিক নেটওয়ার্ক রিকোয়েস্ট ছাড়াই জেড.এআই কথোপকথন PDF, DOCX, Markdown, HTML, TXT, JSON, PNG এবং CSV-তে এক্সপোর্ট করুন।",
+    "description": "The extension description in Bengali"
+  },
+  "actionTitle": {
+    "message": "জেড.এআই চ্যাট এক্সপোর্টার",
+    "description": "Action title shown on toolbar hover in Bengali"
+  },
+  "commandOpenExporter": {
+    "message": "জেড.এআই চ্যাট এক্সপোর্টার প্যানেল খুলুন",
+    "description": "Shortcut command description in Bengali"
+  },
+  "btnExport": {
+    "message": "এক্সপোর্ট করুন",
+    "description": "Export button text in Bengali"
+  },
+  "btnPreview": {
+    "message": "প্রিভিউ",
+    "description": "Preview button text in Bengali"
+  },
+  "btnHistory": {
+    "message": "হিস্ট্রি",
+    "description": "History drawer button text in Bengali"
+  },
+  "btnClose": {
+    "message": "বন্ধ করুন",
+    "description": "Close button text in Bengali"
+  },
+  "btnCancel": {
+    "message": "বাতিল",
+    "description": "Cancel button text in Bengali"
+  },
+  "lblRange": {
+    "message": "মেসেজের পরিসীমা",
+    "description": "Label for message range selector in Bengali"
+  },
+  "rangeAll": {
+    "message": "সব মেসেজ",
+    "description": "Range option for all messages in Bengali"
+  },
+  "rangeCustom": {
+    "message": "কাস্টম নির্বাচন",
+    "description": "Range option for custom selection in Bengali"
+  },
+  "rangeFromHere": {
+    "message": "চিহ্নিত মেসেজ থেকে শেষ পর্যন্ত",
+    "description": "Range option from current message to end in Bengali"
+  },
+  "lblFormat": {
+    "message": "ফরম্যাট",
+    "description": "Export format selector label in Bengali"
+  },
+  "lblPdfEngine": {
+    "message": "পিডিএফ ইঞ্জিন",
+    "description": "PDF engine selector label in Bengali"
+  },
+  "lblMdPreset": {
+    "message": "মার্কডাউন প্রিসেট",
+    "description": "Markdown preset label in Bengali"
+  },
+  "lblTheme": {
+    "message": "থিম",
+    "description": "Theme selector label in Bengali"
+  },
+  "lblIncludeThinking": {
+    "message": "চিন্তাভাবনা ও বিশ্লেষণ যুক্ত করুন",
+    "description": "Checkbox to include thinking blocks in Bengali"
+  },
+  "lblIncludeArtifacts": {
+    "message": "আর্টিফ্যাক্টস / ক্যানভাস যুক্ত করুন",
+    "description": "Checkbox to include artifacts in Bengali"
+  },
+  "lblIncludeCitations": {
+    "message": "তথ্যসূত্র ও সার্চ ফলাফল যুক্ত করুন",
+    "description": "Checkbox to include citations in Bengali"
+  },
+  "lblAnonymizePii": {
+    "message": "ব্যক্তিগত তথ্য আড়াল করুন (ইমেইল, টোকেন, কি)",
+    "description": "Checkbox to anonymize PII in Bengali"
+  },
+  "lblSaveHistory": {
+    "message": "লোকাল হিস্ট্রিতে সংরক্ষণ করুন",
+    "description": "Checkbox to save export into local IndexedDB in Bengali"
+  },
+  "statusScraping": {
+    "message": "কথোপকথন সংগ্রহ করা হচ্ছে...",
+    "description": "Progress state scraping in Bengali"
+  },
+  "statusRendering": {
+    "message": "ফাইল রেন্ডার করা হচ্ছে...",
+    "description": "Progress state rendering in Bengali"
+  },
+  "statusSaving": {
+    "message": "সংরক্ষণ করা হচ্ছে...",
+    "description": "Progress state saving in Bengali"
+  },
+  "statusComplete": {
+    "message": "এক্সপোর্ট সম্পন্ন হয়েছে!",
+    "description": "Progress state complete in Bengali"
+  },
+  "statusStreaming": {
+    "message": "উত্তরের সমাপ্তির জন্য অপেক্ষা করা হচ্ছে...",
+    "description": "Streaming wait indicator in Bengali"
+  },
+  "errLocateFailed": {
+    "message": "এই পৃষ্ঠায় কোনো চ্যাট বার্তা খুঁজে পাওয়া যায়নি।",
+    "description": "Error when DOM cannot be located in Bengali"
+  },
+  "errNoConversation": {
+    "message": "এক্সপোর্ট করার জন্য কোনো কথোপকথন পাওয়া যায়নি।",
+    "description": "Error when thread is empty in Bengali"
+  },
+  "errStreamTimeout": {
+    "message": "স্ট্রিম সময়সীমা শেষ হয়েছে। আংশিক উত্তর গ্রহণ করা হয়েছে।",
+    "description": "Error warning on stream timeout in Bengali"
+  }
+}

@@ -1,0 +1,35 @@
+<div class="chat-thread">
+  <h1 class="chat-title">Multi-Language Code Examples</h1>
+
+  <div class="user-message" data-role="user">
+    <p>Show me code snippets in JavaScript, Python, and C++.</p>
+  </div>
+
+  <div class="assistant-message" data-role="assistant">
+    <p>Here are snippets in three distinct programming languages:</p>
+
+    <h3>JavaScript</h3>
+    <pre class="language-javascript"><code class="language-javascript">function greet(name) {
+  return `Hello, ${name}!`;
+}
+console.log(greet('World'));</code></pre>
+
+    <h3>Python</h3>
+    <pre class="language-python"><code class="language-python">def calculate_squares(numbers: list[int]) -> list[int]:
+    return [n ** 2 for n in numbers]
+
+print(calculate_squares([1, 2, 3, 4]))</code></pre>
+
+    <h3>C++</h3>
+    <pre class="language-cpp"><code class="language-cpp">#include &lt;iostream&gt;
+#include &lt;vector&gt;
+
+int main() {
+    std::vector&lt;int&gt; nums = {10, 20, 30};
+    for (int n : nums) {
+        std::cout &lt;&lt; n &lt;&lt; std::endl;
+    }
+    return 0;
+}</code></pre>
+  </div>
+</div>

@@ -1,0 +1,38 @@
+<div class="chat-thread">
+  <h1 class="chat-title">Performance Comparison</h1>
+
+  <div class="user-message" data-role="user">
+    <p>Can you contrast microservices and monoliths in a matrix table?</p>
+  </div>
+
+  <div class="assistant-message" data-role="assistant">
+    <p>Below is a comparative breakdown:</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Architecture</th>
+          <th>Deployment Complexity</th>
+          <th>Scalability</th>
+          <th>Observability</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Monolith</td>
+          <td>Low</td>
+          <td>Vertical / Replicated</td>
+          <td>Single runtime tracing</td>
+        </tr>
+        <tr>
+          <td rowspan="2">Microservices</td>
+          <td>High (orchestration needed)</td>
+          <td>Independent service scaling</td>
+          <td>Distributed tracing required</td>
+        </tr>
+        <tr>
+          <td colspan="3">Note: Microservices introduce network latency and partial failure modes.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>

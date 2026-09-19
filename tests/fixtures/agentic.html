@@ -1,0 +1,46 @@
+<div class="chat-thread">
+  <h1 class="chat-title">Research Analysis & Tool Invocations</h1>
+
+  <div class="user-message" data-role="user">
+    <p>Perform an in-depth web investigation into quantum computing developments.</p>
+  </div>
+
+  <div class="assistant-message" data-role="assistant">
+    <!-- Thinking Block -->
+    <details class="reasoning-block" open>
+      <summary>Thinking Process (1450ms)</summary>
+      <div class="think-content">
+        User is requesting an analysis of quantum computing. I need to invoke search tools, summarize breakthroughs, and cite trustworthy sources.
+      </div>
+    </details>
+
+    <!-- Tool Call -->
+    <div class="tool-call-block" data-tool="arxiv_search">
+      <div class="tool-name">Tool Call: arxiv_search</div>
+      <div class="tool-input">{"query": "fault tolerant quantum error correction 2024", "max_results": 2}</div>
+      <div class="tool-output">Found 2 matching preprints on surface codes and neutral atoms.</div>
+    </div>
+
+    <!-- Search Result & Citations -->
+    <div class="search-results-block">
+      <h4>Referenced Web Sources</h4>
+      <div class="search-item">
+        <a class="citation" href="https://example.org/quantum-report" data-index="1">
+          [1] Quantum Scalability Milestones
+        </a>
+        <p class="snippet">Recent neutral atom arrays have reached logical qubit entanglement thresholds with high fidelity.</p>
+      </div>
+    </div>
+
+    <!-- Artifact / Code Editor -->
+    <div class="artifact-canvas" data-title="Quantum Simulation Script">
+      <h4>Artifact: Quantum Simulation Script (python)</h4>
+      <pre class="language-python"><code class="language-python"># Quantum state vector demo
+import math
+qubit_0 = [1.0, 0.0]
+print("Qubit initialized:", qubit_0)</code></pre>
+    </div>
+
+    <p>Based on our verification, error correction overhead remains the primary engineering hurdle <sup class="cite">[1]</sup>.</p>
+  </div>
+</div>

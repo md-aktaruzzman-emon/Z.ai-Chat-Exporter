@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Z.ai Chat Exporter</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <div class="popup-container">
+      <header class="popup-header">
+        <div class="logo-title">
+          <img src="../assets/icons/32.png" alt="Z.ai Exporter" width="24" height="24" />
+          <h1>Z.ai Chat Exporter</h1>
+        </div>
+        <span class="version-tag">v2.0.0</span>
+      </header>
+
+      <div id="page-status-box" class="status-box">Checking active tab...</div>
+
+      <div class="action-buttons">
+        <button type="button" id="btn-open-panel" class="btn btn-primary" disabled>
+          Open Exporter Panel (Alt+Shift+E)
+        </button>
+        <button type="button" id="btn-open-options" class="btn btn-secondary">
+          Settings & Preferences
+        </button>
+      </div>
+
+      <div class="quick-shortcuts">
+        <h3>Quick Export (Current Tab)</h3>
+        <div class="shortcut-grid">
+          <button type="button" class="btn-quick" data-format="pdf" disabled>PDF</button>
+          <button type="button" class="btn-quick" data-format="md" disabled>Markdown</button>
+          <button type="button" class="btn-quick" data-format="docx" disabled>DOCX</button>
+          <button type="button" class="btn-quick" data-format="json" disabled>JSON</button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>

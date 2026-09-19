@@ -1,0 +1,217 @@
+/**
+ * @file docx.js
+ * DOCX document generator using docx library in browser context.
+ * Section 16.3 of the authoritative specification.
+ */
+
+import {
+  Document,
+  Packer,
+  Paragraph,
+  TextRun,
+  HeadingLevel,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType
+} from 'docx';
+import { generateFilename } from '../core/utils/filename.js';
+import { anonymizeConversation } from './pii.js';
+
+/**
+ * Creates DOCX paragraphs and tables from conversation blocks.
+ */
+function createBlocksDocx(msg, modelName) {
+  const isUser = msg.role === 'user';
+  const roleName = isUser ? 'User' : modelName || 'Z.ai Assistant';
+  const items = [];
+
+  // Speaker heading
+  items.push(
+    new Paragraph({
+      heading: HeadingLevel.HEADING_2,
+      spacing: { before: 200, after: 100 },
+      children: [
+        new TextRun({
+          text: `[${roleName}]`,
+          bold: true,
+          color: isUser ? '4F46E5' : '059669'
+        })
+      ]
+    })
+  );
+
+  if (Array.isArray(msg.blocks) && msg.blocks.length > 0) {
+    for (const block of msg.blocks) {
+      if (block.kind === 'code') {
+        items.push(
+          new Paragraph({
+            spacing: { before: 100, after: 100 },
+            children: [
+              new TextRun({
+                text: block.code || '',
+                font: 'Courier New',
+                size: 20
+              })
+            ]
+          })
+        );
+      } else if (block.kind === 'math') {
+        items.push(
+          new Paragraph({
+            spacing: { before: 80, after: 80 },
+            children: [
+              new TextRun({
+                text: `[Formula: ${block.tex}]`,
+                italics: true,
+                color: '4F46E5'
+              })
+            ]
+          })
+        );
+      } else if (block.kind === 'thinking') {
+        items.push(
+          new Paragraph({
+            spacing: { before: 80, after: 80 },
+            children: [
+              new TextRun({
+                text: `Thinking: ${block.text}`,
+                italics: true,
+                color: '6B7280'
+              })
+            ]
+          })
+        );
+      } else if (block.kind === 'citation') {
+        items.push(
+          new Paragraph({
+            spacing: { before: 60, after: 60 },
+            children: [
+              new TextRun({
+                text: `Source: ${block.title} (${block.url})`,
+                color: '2563EB'
+              })
+            ]
+          })
+        );
+      } else if (block.kind === 'table' && block.html) {
+        try {
+          let doc = null;
+          if (typeof DOMParser !== 'undefined') {
+            const parser = new DOMParser();
+            doc = parser.parseFromString(block.html, 'text/html');
+          } else if (typeof document !== 'undefined') {
+            doc = document.implementation.createHTMLDocument('');
+            doc.body.innerHTML = block.html;
+          }
+          if (doc) {
+            const trElements = Array.from(doc.querySelectorAll('tr'));
+            if (trElements.length > 0) {
+              const rows = trElements.map((tr) => {
+                const cells = Array.from(tr.querySelectorAll('th, td')).map((cell) => {
+                  return new TableCell({
+                    children: [
+                      new Paragraph({
+                        children: [
+                          new TextRun({
+                            text: cell.textContent.trim(),
+                            bold: cell.tagName.toLowerCase() === 'th'
+                          })
+                        ]
+                      })
+                    ]
+                  });
+                });
+                return new TableRow({ children: cells });
+              });
+              items.push(new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE } }));
+            }
+          }
+        } catch {
+          const raw = block.text || block.html?.replace(/<[^>]*>/g, ' ') || '';
+          items.push(
+            new Paragraph({
+              spacing: { before: 60, after: 60 },
+              children: [new TextRun({ text: raw })]
+            })
+          );
+        }
+      } else {
+        const raw = block.text || block.html?.replace(/<[^>]*>/g, '') || '';
+        items.push(
+          new Paragraph({
+            spacing: { before: 60, after: 60 },
+            children: [new TextRun({ text: raw })]
+          })
+        );
+      }
+    }
+  } else {
+    items.push(
+      new Paragraph({
+        spacing: { before: 60, after: 60 },
+        children: [new TextRun({ text: msg.text || '' })]
+      })
+    );
+  }
+
+  return items;
+}
+
+/**
+ * Exports conversation to Microsoft Word (.docx).
+ * @param {import('../core/conversation-model.js').Conversation} originalConversation
+ * @param {Object} options
+ * @returns {Promise<{ blob: Blob, filename: string, mime: string }>}
+ */
+export async function exportConversation(originalConversation, options = {}) {
+  const { anonymizePii = false } = options;
+  const conv = anonymizePii ? anonymizeConversation(originalConversation) : originalConversation;
+
+  const docChildren = [
+    new Paragraph({
+      heading: HeadingLevel.TITLE,
+      children: [new TextRun({ text: conv.title, bold: true })]
+    }),
+    new Paragraph({
+      spacing: { after: 200 },
+      children: [
+        new TextRun({
+          text: `Model: ${conv.model} | Exported: ${new Date(conv.createdAt).toLocaleString()}`,
+          color: '6B7280',
+          size: 18
+        })
+      ]
+    })
+  ];
+
+  for (const msg of conv.messages) {
+    const msgParagraphs = createBlocksDocx(msg, conv.model);
+    docChildren.push(...msgParagraphs);
+  }
+
+  const doc = new Document({
+    sections: [
+      {
+        properties: {},
+        children: docChildren
+      }
+    ]
+  });
+
+  const blob = await Packer.toBlob(doc);
+  const mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  const filename = generateFilename({
+    template: options.template,
+    title: conv.title,
+    format: 'docx',
+    model: conv.model,
+    timestamp: conv.createdAt
+  });
+
+  return {
+    blob,
+    filename,
+    mime
+  };
+}

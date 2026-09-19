@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate icons
+        run: npm run generate-icons
+
+      - name: Lint check
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Run unit & integration tests
+        run: npm run test
+
+      - name: Build extension
+        run: npm run build
+
+      - name: Validate build artifacts
+        run: |
+          test -f dist/manifest.json || exit 1
+          echo "Build manifest exists."
+
+      - name: Package extension
+        run: |
+          cd dist && zip -r ../dist.zip . && cd ..
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zai-chat-exporter-v2.0.0
+          path: dist.zip

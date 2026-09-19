@@ -1,0 +1,62 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_extName__",
+  "version": "2.0.0",
+  "description": "__MSG_extDesc__",
+  "default_locale": "en",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "src/assets/icons/16.png",
+    "32": "src/assets/icons/32.png",
+    "48": "src/assets/icons/48.png",
+    "128": "src/assets/icons/128.png"
+  },
+  "permissions": [
+    "activeTab",
+    "downloads",
+    "storage",
+    "offscreen"
+  ],
+  "optional_permissions": [
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "https://chat.z.ai/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chat.z.ai/*"],
+      "js": ["src/content/index.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "__MSG_actionTitle__"
+  },
+  "options_ui": {
+    "page": "src/options/options.html",
+    "open_in_tab": true
+  },
+  "commands": {
+    "open-exporter": {
+      "suggested_key": {
+        "default": "Alt+Shift+E"
+      },
+      "description": "__MSG_commandOpenExporter__"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["src/assets/icons/*"],
+      "matches": ["https://chat.z.ai/*"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

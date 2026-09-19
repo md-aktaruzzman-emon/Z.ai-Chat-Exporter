@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Z.ai Chat Exporter - Settings</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <div class="options-container">
+      <header class="options-header">
+        <div class="brand">
+          <img src="../assets/icons/48.png" alt="Z.ai Exporter" width="36" height="36" />
+          <div>
+            <h1>Z.ai Chat Exporter Settings</h1>
+            <p class="subtitle">
+              Configure export defaults, privacy scrubbing, and custom selector profiles
+            </p>
+          </div>
+        </div>
+        <span class="version-tag">Version 2.0.0</span>
+      </header>
+
+      <main class="options-body">
+        <!-- Default Settings Form -->
+        <section class="settings-card">
+          <h2>Export Defaults</h2>
+
+          <div class="form-row">
+            <label for="opt-filename-template">Default Filename Template</label>
+            <input
+              type="text"
+              id="opt-filename-template"
+              class="form-input"
+              value="{{title}}_{{date}}"
+            />
+            <div class="help-text">
+              Tokens: {{title}}, {{date}}, {{time}}, {{model}}, {{format}}
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-row">
+              <label for="opt-default-theme">Default Theme</label>
+              <select id="opt-default-theme" class="form-select">
+                <option value="auto">Auto (Page Theme)</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </div>
+
+            <div class="form-row">
+              <label for="opt-pdf-engine">Default PDF Engine</label>
+              <select id="opt-pdf-engine" class="form-select">
+                <option value="vector">Vector (Selectable Text)</option>
+                <option value="raster">Raster (html2pdf)</option>
+              </select>
+            </div>
+
+            <div class="form-row">
+              <label for="opt-md-preset">Default Markdown Preset</label>
+              <select id="opt-md-preset" class="form-select">
+                <option value="github">GitHub Flavored Markdown</option>
+                <option value="obsidian">Obsidian Callouts & Tags</option>
+                <option value="notion">Notion Paste Safe</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <!-- Privacy & Opt-ins -->
+        <section class="settings-card">
+          <h2>Privacy & Features</h2>
+
+          <label class="checkbox-row">
+            <input type="checkbox" id="opt-anonymize-pii" />
+            <div>
+              <strong>Anonymize PII by default</strong>
+              <div class="help-text">
+                Automatically scrub email addresses, phone numbers, API keys, and bearer tokens.
+              </div>
+            </div>
+          </label>
+
+          <label class="checkbox-row">
+            <input type="checkbox" id="opt-history-optin" checked />
+            <div>
+              <strong>Enable Local Export History</strong>
+              <div class="help-text">
+                Save recent exports into local IndexedDB (up to 200 items). Blobs &gt; 5MB keep
+                metadata only.
+              </div>
+            </div>
+          </label>
+
+          <label class="checkbox-row">
+            <input type="checkbox" id="opt-context-menu" />
+            <div>
+              <strong>Enable Browser Context Menus</strong>
+              <div class="help-text">
+                Requests optional permission to add right-click quick export options on chat.z.ai.
+              </div>
+            </div>
+          </label>
+        </section>
+
+        <!-- Selector Profile Manager -->
+        <section class="settings-card">
+          <h2>Selector Profiles (Advanced)</h2>
+          <p class="help-text">Manage DOM selector overrides if Z.ai updates its layout classes.</p>
+
+          <div class="profile-actions">
+            <button type="button" id="btn-export-profile" class="btn btn-secondary">
+              Export Profile JSON
+            </button>
+            <button type="button" id="btn-import-profile" class="btn btn-secondary">
+              Import Profile JSON
+            </button>
+            <input type="file" id="file-import-profile" accept=".json" style="display: none" />
+          </div>
+        </section>
+
+        <div class="footer-actions">
+          <button type="button" id="btn-save-settings" class="btn btn-primary">
+            Save Settings
+          </button>
+          <span id="save-status" class="save-status"></span>
+        </div>
+      </main>
+    </div>
+    <script type="module" src="./options.js"></script>
+  </body>
+</html>

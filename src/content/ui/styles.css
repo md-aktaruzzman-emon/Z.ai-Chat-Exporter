@@ -1,0 +1,286 @@
+/**
+ * Styles for closed Shadow DOM injected UI elements.
+ * Supports light & dark themes, WCAG contrast, and prefers-reduced-motion.
+ */
+
+:host {
+  --zaix-primary: #4f46e5;
+  --zaix-primary-hover: #4338ca;
+  --zaix-bg: #ffffff;
+  --zaix-text: #1f2937;
+  --zaix-muted: #6b7280;
+  --zaix-border: #e5e7eb;
+  --zaix-surface: #f9fafb;
+  --zaix-focus-ring: 0 0 0 3px rgba(79, 70, 229, 0.4);
+  --zaix-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  --zaix-radius: 8px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--zaix-text);
+  box-sizing: border-box;
+}
+
+:host([data-theme='dark']) {
+  --zaix-bg: #1e1e24;
+  --zaix-text: #f3f4f6;
+  --zaix-muted: #9ca3af;
+  --zaix-border: #374151;
+  --zaix-surface: #272730;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: inherit;
+}
+
+/* Floating Action Button */
+.zaix-fab {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background-color: var(--zaix-primary);
+  color: #ffffff;
+  border: none;
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4);
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2147483647;
+  transition:
+    transform 0.15s ease,
+    background-color 0.15s ease;
+  user-select: none;
+}
+
+.zaix-fab:hover {
+  background-color: var(--zaix-primary-hover);
+  transform: scale(1.05);
+}
+
+.zaix-fab:active {
+  cursor: grabbing;
+  transform: scale(0.95);
+}
+
+.zaix-fab:focus-visible {
+  outline: none;
+  box-shadow: var(--zaix-focus-ring);
+}
+
+.zaix-fab svg {
+  width: 24px;
+  height: 24px;
+  fill: currentColor;
+}
+
+/* Export Panel Modal */
+.zaix-panel-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2147483646;
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+.zaix-panel-overlay.hidden {
+  display: none;
+}
+
+.zaix-panel {
+  background: var(--zaix-bg);
+  border: 1px solid var(--zaix-border);
+  border-radius: var(--zaix-radius);
+  width: 460px;
+  max-width: 92vw;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--zaix-shadow);
+  overflow: hidden;
+}
+
+.zaix-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--zaix-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.zaix-title {
+  font-weight: 600;
+  font-size: 16px;
+  margin: 0;
+}
+
+.zaix-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--zaix-muted);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.zaix-close-btn:hover {
+  color: var(--zaix-text);
+  background: var(--zaix-surface);
+}
+
+.zaix-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.zaix-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.zaix-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--zaix-text);
+}
+
+.zaix-input,
+.zaix-select {
+  padding: 8px 10px;
+  border: 1px solid var(--zaix-border);
+  border-radius: 6px;
+  background: var(--zaix-surface);
+  color: var(--zaix-text);
+  font-size: 13px;
+}
+
+.zaix-input:focus,
+.zaix-select:focus {
+  outline: none;
+  border-color: var(--zaix-primary);
+  box-shadow: var(--zaix-focus-ring);
+}
+
+.zaix-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.zaix-checkbox-label input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--zaix-primary);
+  cursor: pointer;
+}
+
+/* Stats Box */
+.zaix-stats-box {
+  background: var(--zaix-surface);
+  border: 1px solid var(--zaix-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  text-align: center;
+}
+
+.zaix-stat-val {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--zaix-primary);
+}
+
+.zaix-stat-lbl {
+  font-size: 11px;
+  color: var(--zaix-muted);
+}
+
+/* Status Indicator */
+.zaix-status {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--zaix-surface);
+  border-left: 3px solid var(--zaix-primary);
+}
+
+.zaix-status.error {
+  border-left-color: #dc2626;
+  color: #dc2626;
+}
+
+/* Footer & Action Buttons */
+.zaix-footer {
+  padding: 12px 18px;
+  border-top: 1px solid var(--zaix-border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  background: var(--zaix-surface);
+}
+
+.zaix-btn {
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid var(--zaix-border);
+  background: var(--zaix-bg);
+  color: var(--zaix-text);
+  cursor: pointer;
+}
+
+.zaix-btn:hover {
+  background: var(--zaix-surface);
+}
+
+.zaix-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--zaix-focus-ring);
+}
+
+.zaix-btn-primary {
+  background: var(--zaix-primary);
+  color: #ffffff;
+  border-color: var(--zaix-primary);
+}
+
+.zaix-btn-primary:hover {
+  background: var(--zaix-primary-hover);
+}
+
+.zaix-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zaix-fab,
+  .zaix-panel-overlay {
+    transition: none !important;
+  }
+}

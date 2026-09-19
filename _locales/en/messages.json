@@ -1,0 +1,122 @@
+{
+  "extName": {
+    "message": "Z.ai Chat Exporter",
+    "description": "The extension name"
+  },
+  "extDesc": {
+    "message": "Export Z.ai conversations to PDF, DOCX, Markdown, HTML, TXT, JSON, PNG, and CSV with zero external network requests.",
+    "description": "The extension description"
+  },
+  "actionTitle": {
+    "message": "Z.ai Chat Exporter",
+    "description": "Action title shown on toolbar hover"
+  },
+  "commandOpenExporter": {
+    "message": "Open Z.ai Chat Exporter panel",
+    "description": "Shortcut command description"
+  },
+  "btnExport": {
+    "message": "Export",
+    "description": "Export button text"
+  },
+  "btnPreview": {
+    "message": "Preview",
+    "description": "Preview button text"
+  },
+  "btnHistory": {
+    "message": "History",
+    "description": "History drawer button text"
+  },
+  "btnClose": {
+    "message": "Close",
+    "description": "Close button text"
+  },
+  "btnCancel": {
+    "message": "Cancel",
+    "description": "Cancel button text"
+  },
+  "lblRange": {
+    "message": "Export Range",
+    "description": "Label for message range selector"
+  },
+  "rangeAll": {
+    "message": "All Messages",
+    "description": "Range option for all messages"
+  },
+  "rangeCustom": {
+    "message": "Custom Selection",
+    "description": "Range option for custom selection"
+  },
+  "rangeFromHere": {
+    "message": "From Selected to End",
+    "description": "Range option from current message to end"
+  },
+  "lblFormat": {
+    "message": "Format",
+    "description": "Export format selector label"
+  },
+  "lblPdfEngine": {
+    "message": "PDF Engine",
+    "description": "PDF engine selector label"
+  },
+  "lblMdPreset": {
+    "message": "Markdown Preset",
+    "description": "Markdown preset label"
+  },
+  "lblTheme": {
+    "message": "Theme",
+    "description": "Theme selector label"
+  },
+  "lblIncludeThinking": {
+    "message": "Include Thinking & Reasoning",
+    "description": "Checkbox to include thinking blocks"
+  },
+  "lblIncludeArtifacts": {
+    "message": "Include Artifacts / Canvas",
+    "description": "Checkbox to include artifacts"
+  },
+  "lblIncludeCitations": {
+    "message": "Include Citations & Search",
+    "description": "Checkbox to include citations"
+  },
+  "lblAnonymizePii": {
+    "message": "Anonymize PII (Emails, Keys, Tokens)",
+    "description": "Checkbox to anonymize PII"
+  },
+  "lblSaveHistory": {
+    "message": "Save to Local History",
+    "description": "Checkbox to save export into local IndexedDB"
+  },
+  "statusScraping": {
+    "message": "Scraping conversation...",
+    "description": "Progress state scraping"
+  },
+  "statusRendering": {
+    "message": "Rendering export document...",
+    "description": "Progress state rendering"
+  },
+  "statusSaving": {
+    "message": "Saving file...",
+    "description": "Progress state saving"
+  },
+  "statusComplete": {
+    "message": "Export complete!",
+    "description": "Progress state complete"
+  },
+  "statusStreaming": {
+    "message": "Waiting for assistant response to finish...",
+    "description": "Streaming wait indicator"
+  },
+  "errLocateFailed": {
+    "message": "Could not locate chat messages on this page.",
+    "description": "Error when DOM cannot be located"
+  },
+  "errNoConversation": {
+    "message": "No conversation found to export.",
+    "description": "Error when thread is empty"
+  },
+  "errStreamTimeout": {
+    "message": "Streaming timed out. Partial response captured.",
+    "description": "Error warning on stream timeout"
+  }
+}
