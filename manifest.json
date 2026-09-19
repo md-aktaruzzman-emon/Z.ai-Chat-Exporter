@@ -21,7 +21,9 @@
     "contextMenus"
   ],
   "host_permissions": [
-    "https://chat.z.ai/*"
+    "https://chat.z.ai/*",
+    "https://z.ai/*",
+    "https://*.z.ai/*"
   ],
   "background": {
     "service_worker": "src/background/service-worker.js",
@@ -29,7 +31,11 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://chat.z.ai/*"],
+      "matches": [
+        "https://chat.z.ai/*",
+        "https://z.ai/*",
+        "https://*.z.ai/*"
+      ],
       "js": ["src/content/index.js"],
       "run_at": "document_idle"
     }
@@ -53,7 +59,11 @@
   "web_accessible_resources": [
     {
       "resources": ["src/assets/icons/*"],
-      "matches": ["https://chat.z.ai/*"]
+      "matches": [
+        "https://chat.z.ai/*",
+        "https://z.ai/*",
+        "https://*.z.ai/*"
+      ]
     }
   ],
   "content_security_policy": {

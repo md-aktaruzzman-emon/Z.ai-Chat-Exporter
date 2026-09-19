@@ -32,7 +32,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.error('Failed to query active tab:', err);
   }
 
-  const isZai = activeTab?.url && activeTab.url.includes('chat.z.ai');
+  const isZai =
+    activeTab?.url &&
+    (activeTab.url.includes('chat.z.ai') ||
+      activeTab.url.includes('z.ai') ||
+      /https?:\/\/[a-z0-9-.]*z\.ai/i.test(activeTab.url));
 
   if (isZai) {
     statusBox.className = 'status-box active';
@@ -42,7 +46,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   } else {
     statusBox.className = 'status-box inactive';
     statusBox.textContent =
-      'This extension operates on https://chat.z.ai/*. Navigate to Z.ai to export conversations.';
+      'This extension operates on Z.ai (https://chat.z.ai). Open a Z.ai conversation to export.';
     openBtn.disabled = true;
     quickBtns.forEach((btn) => (btn.disabled = true));
   }

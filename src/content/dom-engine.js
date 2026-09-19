@@ -429,6 +429,32 @@ export function locate(overrideProfile) {
     }
   }
 
+  // Fallback 4: Any visible text containers inside main content area
+  if (messageBubbles.length === 0) {
+    const mainCandidate = document.querySelector('main, [role="main"], #__next, #root, body');
+    if (mainCandidate) {
+      const allElements = Array.from(mainCandidate.querySelectorAll('div, section, article, p'));
+      const textBlocks = allElements.filter((el) => {
+        if (el.id === 'zaix-extension-root' || el.closest?.('#zaix-extension-root')) return false;
+        const tag = el.tagName.toLowerCase();
+        if (
+          ['script', 'style', 'nav', 'header', 'footer', 'input', 'textarea', 'button'].includes(
+            tag
+          )
+        )
+          return false;
+        const txt = el.textContent?.trim() || '';
+        return txt.length > 15 && el.children.length <= 2;
+      });
+      if (textBlocks.length > 0) {
+        const uniqueParents = new Set(textBlocks.map((t) => t.parentElement || t));
+        messageBubbles = Array.from(uniqueParents).filter(
+          (p) => !p.closest?.('#zaix-extension-root')
+        );
+      }
+    }
+  }
+
   // Section 11.8: When zero usable message bubbles are found, log each candidate selector and match count
   if (messageBubbles.length === 0) {
     console.debug('[Z.ai Exporter] locate(): Zero message bubbles found. Candidate inspection:');

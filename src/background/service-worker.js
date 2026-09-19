@@ -49,6 +49,33 @@ async function ensureOffscreenDocument() {
 }
 
 /**
+ * Sends a message to the offscreen document with automatic retry if the document is initializing.
+ * @param {Object} message
+ * @param {number} [maxRetries=5]
+ * @returns {Promise<any>}
+ */
+async function sendToOffscreenWithRetry(message, maxRetries = 5) {
+  await ensureOffscreenDocument();
+  let lastError = null;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const res = await chrome.runtime.sendMessage({
+        target: 'offscreen',
+        ...message
+      });
+      if (res !== undefined) {
+        return res;
+      }
+    } catch (err) {
+      lastError = err;
+    }
+    await new Promise((r) => setTimeout(r, 80 * (i + 1)));
+  }
+  if (lastError) throw lastError;
+  throw new Error('OFFSCREEN_UNRESPONSIVE: Offscreen document did not respond in time');
+}
+
+/**
  * Displays temporary badge status on the extension action icon.
  * @param {'success'|'error'} status
  */
@@ -74,7 +101,11 @@ function setActionBadge(status) {
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === 'open-exporter') {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTab?.id && activeTab.url?.includes('chat.z.ai')) {
+    if (
+      activeTab?.id &&
+      activeTab.url &&
+      (activeTab.url.includes('z.ai') || /https?:\/\/[a-z0-9-.]*z\.ai/i.test(activeTab.url))
+    ) {
       chrome.tabs.sendMessage(activeTab.id, { type: 'OPEN_PANEL' }).catch(() => {});
     }
   }
@@ -87,12 +118,14 @@ async function setupContextMenus() {
   const hasPermission = await chrome.permissions.contains({ permissions: ['contextMenus'] });
   if (!hasPermission) return;
 
+  const urlPatterns = ['https://chat.z.ai/*', 'https://z.ai/*', 'https://*.z.ai/*'];
+
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: 'zai-export-root',
       title: 'Export conversation',
       contexts: ['page'],
-      documentUrlPatterns: ['https://chat.z.ai/*']
+      documentUrlPatterns: urlPatterns
     });
 
     chrome.contextMenus.create({
@@ -210,12 +243,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             throw new Error('INVALID_MESSAGE: Missing conversation or format parameters');
           }
 
-          // Ensure offscreen document is active
-          await ensureOffscreenDocument();
-
-          // Forward rendering request explicitly to offscreen document
-          const renderResponse = await chrome.runtime.sendMessage({
-            target: 'offscreen',
+          // Forward rendering request explicitly to offscreen document with retry
+          const renderResponse = await sendToOffscreenWithRetry({
             type: 'RENDER_EXPORT',
             format,
             engine,
@@ -260,9 +289,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case 'OPEN_PREVIEW':
         case 'OPEN_PREVIEW_REQUEST': {
-          await ensureOffscreenDocument();
-          return await chrome.runtime.sendMessage({
-            target: 'offscreen',
+          return await sendToOffscreenWithRetry({
             type: 'RENDER_EXPORT',
             ...message
           });
@@ -273,11 +300,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'HISTORY_GET':
         case 'HISTORY_DELETE':
         case 'HISTORY_CLEAR': {
-          await ensureOffscreenDocument();
-          return await chrome.runtime.sendMessage({
-            target: 'offscreen',
-            ...message
-          });
+          return await sendToOffscreenWithRetry(message);
         }
 
         case 'PROFILE_GET': {
