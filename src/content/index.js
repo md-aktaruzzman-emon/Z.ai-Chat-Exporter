@@ -3,7 +3,7 @@
  * Content script bootstrap injecting closed Shadow DOM UI into chat.z.ai.
  */
 
-import { onThreadChange, isStreaming } from './dom-engine.js';
+import { onThreadChange, isStreaming, detectTheme } from './dom-engine.js';
 import { scrapeConversation } from './scraper.js';
 import { createFloatingButton } from './ui/floating-button.js';
 import { createPanel } from './ui/panel.js';
@@ -32,6 +32,10 @@ function initContainer() {
   shadowRootHost.id = 'zaix-extension-root';
   shadowRootHost.style.position = 'fixed';
   shadowRootHost.style.zIndex = '2147483647';
+
+  // Apply active page theme to container
+  const activeTheme = detectTheme();
+  shadowRootHost.setAttribute('data-theme', activeTheme);
 
   // Strict closed Shadow DOM as required by Section 5 & 18
   shadowRoot = shadowRootHost.attachShadow({ mode: 'closed' });
@@ -64,6 +68,10 @@ function initContainer() {
     onExport: handleExport,
     onPreview: handlePreview,
     onHistory: handleHistory,
+    onThemeChange: (theme) => {
+      const resolved = theme === 'auto' ? detectTheme() : theme;
+      shadowRootHost.setAttribute('data-theme', resolved);
+    },
     onClose: () => {
       panelInstance.element.classList.add('hidden');
     }
@@ -87,6 +95,12 @@ function initContainer() {
 async function openPanel() {
   if (!panelInstance) return;
   panelInstance.element.classList.remove('hidden');
+
+  // Synchronize auto theme with current host theme
+  const currentOptions = panelInstance.getOptions();
+  if (currentOptions.theme === 'auto') {
+    shadowRootHost.setAttribute('data-theme', detectTheme());
+  }
 
   try {
     const isBusy = isStreaming();

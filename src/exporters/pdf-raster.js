@@ -48,10 +48,11 @@ function buildRenderHtml(conv, theme) {
  * @returns {Promise<{ blob: Blob, filename: string, mime: string }>}
  */
 export async function exportConversation(originalConversation, options = {}) {
-  const { anonymizePii = false, theme = 'light', pageFormat = 'a4' } = options;
+  const { anonymizePii = false, theme = 'auto', pageFormat = 'a4' } = options;
   const conv = anonymizePii ? anonymizeConversation(originalConversation) : originalConversation;
 
-  const html = buildRenderHtml(conv, theme);
+  const resolvedTheme = theme === 'auto' || !theme ? conv.theme || 'light' : theme;
+  const html = buildRenderHtml(conv, resolvedTheme);
   const container = document.createElement('div');
   container.innerHTML = html;
   document.body.appendChild(container);

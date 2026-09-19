@@ -155,6 +155,34 @@ chrome.contextMenus?.onClicked?.addListener(async (info, tab) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== 'object') return false;
 
+  // IMPORTANT: Do not intercept messages meant for the offscreen document
+  const OFFSCREEN_TYPES = [
+    'RENDER_EXPORT',
+    'HISTORY_SAVE',
+    'HISTORY_LIST',
+    'HISTORY_GET',
+    'HISTORY_DELETE',
+    'HISTORY_CLEAR'
+  ];
+  if (message.target === 'offscreen' || OFFSCREEN_TYPES.includes(message.type)) {
+    return false; // Let offscreen document handle it
+  }
+
+  const SERVICE_WORKER_TYPES = [
+    'OPEN_PANEL',
+    'EXPORT_PROGRESS',
+    'EXPORT_REQUEST',
+    'OPEN_PREVIEW',
+    'OPEN_PREVIEW_REQUEST',
+    'PROFILE_GET',
+    'PROFILE_SAVE',
+    'PROFILE_EXPORT',
+    'PROFILE_IMPORT'
+  ];
+  if (!SERVICE_WORKER_TYPES.includes(message.type)) {
+    return false; // Do not consume response channel for unknown messages
+  }
+
   (async () => {
     try {
       switch (message.type) {
@@ -185,8 +213,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // Ensure offscreen document is active
           await ensureOffscreenDocument();
 
-          // Forward rendering request to offscreen document
+          // Forward rendering request explicitly to offscreen document
           const renderResponse = await chrome.runtime.sendMessage({
+            target: 'offscreen',
             type: 'RENDER_EXPORT',
             format,
             engine,
@@ -215,7 +244,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             data: {
               downloadId,
               filename,
-              mime
+              mime,
+              dataUrl
             }
           };
         }
@@ -224,6 +254,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'OPEN_PREVIEW_REQUEST': {
           await ensureOffscreenDocument();
           return await chrome.runtime.sendMessage({
+            target: 'offscreen',
             type: 'RENDER_EXPORT',
             ...message
           });
@@ -235,7 +266,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'HISTORY_DELETE':
         case 'HISTORY_CLEAR': {
           await ensureOffscreenDocument();
-          return await chrome.runtime.sendMessage(message);
+          return await chrome.runtime.sendMessage({
+            target: 'offscreen',
+            ...message
+          });
         }
 
         case 'PROFILE_GET': {
@@ -273,10 +307,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         default:
-          return {
-            ok: false,
-            error: { code: 'UNKNOWN_MESSAGE', message: `Unhandled message type: ${message.type}` }
-          };
+          return false;
       }
     } catch (err) {
       console.error('[ServiceWorker] Error:', err);

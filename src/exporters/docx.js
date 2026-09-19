@@ -44,16 +44,20 @@ function createBlocksDocx(msg, modelName) {
   if (Array.isArray(msg.blocks) && msg.blocks.length > 0) {
     for (const block of msg.blocks) {
       if (block.kind === 'code') {
+        const lines = (block.code || '').split('\n');
+        const codeRuns = lines.map(
+          (line, idx) =>
+            new TextRun({
+              text: line.length > 0 ? line : ' ',
+              font: 'Courier New',
+              size: 19,
+              break: idx > 0 ? 1 : 0
+            })
+        );
         items.push(
           new Paragraph({
             spacing: { before: 100, after: 100 },
-            children: [
-              new TextRun({
-                text: block.code || '',
-                font: 'Courier New',
-                size: 20
-              })
-            ]
+            children: codeRuns
           })
         );
       } else if (block.kind === 'math') {
@@ -138,19 +142,37 @@ function createBlocksDocx(msg, modelName) {
         }
       } else {
         const raw = block.text || block.html?.replace(/<[^>]*>/g, '') || '';
-        items.push(
-          new Paragraph({
-            spacing: { before: 60, after: 60 },
-            children: [new TextRun({ text: raw })]
-          })
-        );
+        if (raw.trim()) {
+          const lines = raw.split('\n');
+          const runs = lines.map(
+            (l, idx) =>
+              new TextRun({
+                text: l,
+                break: idx > 0 ? 1 : 0
+              })
+          );
+          items.push(
+            new Paragraph({
+              spacing: { before: 60, after: 60 },
+              children: runs
+            })
+          );
+        }
       }
     }
-  } else {
+  } else if (msg.text) {
+    const lines = (msg.text || '').split('\n');
+    const runs = lines.map(
+      (l, idx) =>
+        new TextRun({
+          text: l,
+          break: idx > 0 ? 1 : 0
+        })
+    );
     items.push(
       new Paragraph({
         spacing: { before: 60, after: 60 },
-        children: [new TextRun({ text: msg.text || '' })]
+        children: runs
       })
     );
   }

@@ -136,10 +136,11 @@ function buildStandaloneHtml(conv, theme) {
  * @returns {Promise<{ blob: Blob, filename: string, mime: string, previewHtml: string }>}
  */
 export async function exportConversation(originalConversation, options = {}) {
-  const { anonymizePii = false, theme = 'light' } = options;
+  const { anonymizePii = false, theme = 'auto' } = options;
   const conv = anonymizePii ? anonymizeConversation(originalConversation) : originalConversation;
 
-  const htmlContent = buildStandaloneHtml(conv, theme);
+  const resolvedTheme = theme === 'auto' || !theme ? conv.theme || 'light' : theme;
+  const htmlContent = buildStandaloneHtml(conv, resolvedTheme);
   const mime = 'text/html;charset=utf-8';
   const blob = new Blob([htmlContent], { type: mime });
 

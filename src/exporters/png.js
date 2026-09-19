@@ -46,10 +46,11 @@ function buildPngHtml(conv, theme) {
  * @returns {Promise<{ blob: Blob, filename: string, mime: string }>}
  */
 export async function exportConversation(originalConversation, options = {}) {
-  const { anonymizePii = false, theme = 'light' } = options;
+  const { anonymizePii = false, theme = 'auto' } = options;
   const conv = anonymizePii ? anonymizeConversation(originalConversation) : originalConversation;
 
-  const html = buildPngHtml(conv, theme);
+  const resolvedTheme = theme === 'auto' || !theme ? conv.theme || 'light' : theme;
+  const html = buildPngHtml(conv, resolvedTheme);
   const container = document.createElement('div');
   container.innerHTML = html;
   container.style.position = 'absolute';

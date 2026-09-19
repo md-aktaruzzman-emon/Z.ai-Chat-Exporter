@@ -107,6 +107,18 @@ async function clearHistory() {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== 'object') return false;
 
+  const OFFSCREEN_TYPES = [
+    'RENDER_EXPORT',
+    'HISTORY_SAVE',
+    'HISTORY_LIST',
+    'HISTORY_GET',
+    'HISTORY_DELETE',
+    'HISTORY_CLEAR'
+  ];
+  if (!OFFSCREEN_TYPES.includes(message.type) && message.target !== 'offscreen') {
+    return false; // Let service worker or content script handle it
+  }
+
   (async () => {
     try {
       switch (message.type) {

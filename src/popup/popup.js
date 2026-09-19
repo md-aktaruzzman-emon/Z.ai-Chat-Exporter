@@ -10,6 +10,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   const optionsBtn = document.getElementById('btn-open-options');
   const quickBtns = document.querySelectorAll('.btn-quick');
 
+  // Load saved theme preference
+  try {
+    const stored = await chrome.storage?.sync?.get('zaix_user_settings');
+    const savedTheme = stored?.zaix_user_settings?.theme;
+    if (savedTheme === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else if (savedTheme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+
   let activeTab = null;
 
   try {

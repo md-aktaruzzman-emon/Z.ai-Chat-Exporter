@@ -153,27 +153,44 @@ function scoreThreadCandidate(el) {
 export function detectTheme() {
   if (typeof window === 'undefined') return 'light';
 
-  // 1. Color scheme query
-  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-    return 'dark';
-  }
-
-  // 2. Class names or attributes on root
+  // 1. Class names or attributes on root or body (Z.ai specific and general SPA)
   const root = document.documentElement;
-  if (root.classList.contains('dark') || root.getAttribute('data-theme') === 'dark') {
+  const body = document.body;
+  if (
+    root?.classList.contains('dark') ||
+    root?.getAttribute('data-theme') === 'dark' ||
+    body?.classList.contains('dark') ||
+    body?.getAttribute('data-theme') === 'dark'
+  ) {
     return 'dark';
   }
+  if (
+    root?.classList.contains('light') ||
+    root?.getAttribute('data-theme') === 'light' ||
+    body?.classList.contains('light') ||
+    body?.getAttribute('data-theme') === 'light'
+  ) {
+    return 'light';
+  }
 
-  // 3. Fallback luminance detection
+  // 2. Computed luminance of body or root background
   try {
-    const bg = window.getComputedStyle(document.body).backgroundColor;
+    const bg = window.getComputedStyle(body || root).backgroundColor;
     const rgb = bg.match(/\d+/g);
     if (rgb && rgb.length >= 3) {
-      const luminance = 0.299 * Number(rgb[0]) + 0.587 * Number(rgb[1]) + 0.114 * Number(rgb[2]);
-      return luminance < 128 ? 'dark' : 'light';
+      const alpha = rgb.length >= 4 ? Number(rgb[3]) : 1;
+      if (alpha > 0) {
+        const luminance = 0.299 * Number(rgb[0]) + 0.587 * Number(rgb[1]) + 0.114 * Number(rgb[2]);
+        return luminance < 128 ? 'dark' : 'light';
+      }
     }
   } catch {
     // fallback
+  }
+
+  // 3. System color scheme query fallback
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    return 'dark';
   }
 
   return 'light';
@@ -247,12 +264,23 @@ export function locate(overrideProfile) {
     }
   }
 
-  // Fallback: direct children with content
+  // Fallback: unwrap wrapper divs and inspect direct children with content
   if (messageBubbles.length === 0 && bestContainer) {
-    const potentialChildren = Array.from(bestContainer.children).filter((child) => {
-      return child.textContent.trim().length > 0 && child.clientHeight > 20;
+    let containerForChildren = bestContainer;
+    while (
+      containerForChildren &&
+      containerForChildren.children.length === 1 &&
+      containerForChildren.firstElementChild
+    ) {
+      containerForChildren = containerForChildren.firstElementChild;
+    }
+    const potentialChildren = Array.from(containerForChildren.children).filter((child) => {
+      const text = child.textContent?.trim() || '';
+      return (
+        text.length > 0 && (child.clientHeight > 15 || child.scrollHeight > 15 || text.length > 5)
+      );
     });
-    if (potentialChildren.length >= 2) {
+    if (potentialChildren.length >= 1) {
       messageBubbles = potentialChildren;
     }
   }

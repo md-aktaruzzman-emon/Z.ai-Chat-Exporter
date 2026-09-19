@@ -16,15 +16,15 @@
     "description": "Shortcut command description"
   },
   "btnExport": {
-    "message": "Export",
+    "message": "Export Now",
     "description": "Export button text"
   },
   "btnPreview": {
-    "message": "Preview",
+    "message": "Preview Document",
     "description": "Preview button text"
   },
   "btnHistory": {
-    "message": "History",
+    "message": "Export History",
     "description": "History drawer button text"
   },
   "btnClose": {
@@ -36,87 +36,87 @@
     "description": "Cancel button text"
   },
   "lblRange": {
-    "message": "Export Range",
+    "message": "Message Range",
     "description": "Label for message range selector"
   },
   "rangeAll": {
-    "message": "All Messages",
+    "message": "All Messages in Thread",
     "description": "Range option for all messages"
   },
   "rangeCustom": {
-    "message": "Custom Selection",
+    "message": "Select Specific Messages...",
     "description": "Range option for custom selection"
   },
   "rangeFromHere": {
-    "message": "From Selected to End",
+    "message": "From Current View to End",
     "description": "Range option from current message to end"
   },
   "lblFormat": {
-    "message": "Format",
+    "message": "Export Format",
     "description": "Export format selector label"
   },
   "lblPdfEngine": {
-    "message": "PDF Engine",
+    "message": "PDF Rendering Engine",
     "description": "PDF engine selector label"
   },
   "lblMdPreset": {
-    "message": "Markdown Preset",
+    "message": "Markdown Flavor / Preset",
     "description": "Markdown preset label"
   },
   "lblTheme": {
-    "message": "Theme",
+    "message": "Document Theme",
     "description": "Theme selector label"
   },
   "lblIncludeThinking": {
-    "message": "Include Thinking & Reasoning",
+    "message": "Include Thinking & Reasoning blocks",
     "description": "Checkbox to include thinking blocks"
   },
   "lblIncludeArtifacts": {
-    "message": "Include Artifacts / Canvas",
+    "message": "Include Artifacts & Interactive Canvas",
     "description": "Checkbox to include artifacts"
   },
   "lblIncludeCitations": {
-    "message": "Include Citations & Search",
+    "message": "Include Citations & Web Sources",
     "description": "Checkbox to include citations"
   },
   "lblAnonymizePii": {
-    "message": "Anonymize PII (Emails, Keys, Tokens)",
+    "message": "Redact Personal Data (Emails, API Keys, Tokens)",
     "description": "Checkbox to anonymize PII"
   },
   "lblSaveHistory": {
-    "message": "Save to Local History",
+    "message": "Save export to local offline history",
     "description": "Checkbox to save export into local IndexedDB"
   },
   "statusScraping": {
-    "message": "Scraping conversation...",
+    "message": "Reading conversation messages from page...",
     "description": "Progress state scraping"
   },
   "statusRendering": {
-    "message": "Rendering export document...",
+    "message": "Formatting and generating document...",
     "description": "Progress state rendering"
   },
   "statusSaving": {
-    "message": "Saving file...",
+    "message": "Preparing download...",
     "description": "Progress state saving"
   },
   "statusComplete": {
-    "message": "Export complete!",
+    "message": "Export successful! Your document is ready.",
     "description": "Progress state complete"
   },
   "statusStreaming": {
-    "message": "Waiting for assistant response to finish...",
+    "message": "Waiting for AI response to finish generating...",
     "description": "Streaming wait indicator"
   },
   "errLocateFailed": {
-    "message": "Could not locate chat messages on this page.",
+    "message": "Could not detect chat messages on this page. Please open a conversation and try again.",
     "description": "Error when DOM cannot be located"
   },
   "errNoConversation": {
-    "message": "No conversation found to export.",
+    "message": "No conversation messages found to export.",
     "description": "Error when thread is empty"
   },
   "errStreamTimeout": {
-    "message": "Streaming timed out. Partial response captured.",
+    "message": "AI response took longer than expected. Partial conversation captured.",
     "description": "Error warning on stream timeout"
   }
 }

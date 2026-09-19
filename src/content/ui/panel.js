@@ -22,7 +22,7 @@ import { t } from '../../core/utils/i18n.js';
  *   getOptions: () => Object
  * }}
  */
-export function createPanel({ onExport, onPreview, onHistory, onClose }) {
+export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeChange }) {
   const overlay = document.createElement('div');
   overlay.className = 'zaix-panel-overlay hidden';
   overlay.setAttribute('role', 'dialog');
@@ -34,9 +34,12 @@ export function createPanel({ onExport, onPreview, onHistory, onClose }) {
       <div class="zaix-header">
         <div style="display:flex; align-items:center; gap:8px;">
           <h2 class="zaix-title">Z.ai Chat Exporter</h2>
-          <span style="font-size:11px; background:var(--zaix-surface); padding:2px 6px; border-radius:4px; border:1px solid var(--zaix-border); color:var(--zaix-muted);">Ctrl+K for palette</span>
+          <span style="font-size:11px; background:var(--zaix-surface); padding:2px 6px; border-radius:4px; border:1px solid var(--zaix-border); color:var(--zaix-muted);">Ctrl+K</span>
         </div>
-        <button type="button" class="zaix-close-btn" aria-label="Close dialog">&times;</button>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <button type="button" id="zaix-panel-theme-toggle" class="zaix-btn" style="padding:4px 8px; font-size:11.5px;" title="Toggle Theme (Auto / Light / Dark)">☀️ Auto</button>
+          <button type="button" class="zaix-close-btn" aria-label="Close dialog">&times;</button>
+        </div>
       </div>
 
       <div class="zaix-body">
@@ -239,6 +242,47 @@ export function createPanel({ onExport, onPreview, onHistory, onClose }) {
   const exportBtn = overlay.querySelector('#zaix-btn-export');
   const previewBtn = overlay.querySelector('#zaix-btn-preview');
   const historyBtn = overlay.querySelector('#zaix-btn-history');
+  const themeSelect = overlay.querySelector('#zaix-theme-select');
+  const themeToggleBtn = overlay.querySelector('#zaix-panel-theme-toggle');
+
+  let currentTheme = 'auto';
+
+  function updateThemeDisplay(theme) {
+    currentTheme = theme;
+    if (themeSelect) themeSelect.value = theme;
+    if (themeToggleBtn) {
+      if (theme === 'dark') {
+        themeToggleBtn.textContent = '🌙 Dark';
+        themeToggleBtn.setAttribute('title', 'Theme: Dark (Click to cycle)');
+      } else if (theme === 'light') {
+        themeToggleBtn.textContent = '☀️ Light';
+        themeToggleBtn.setAttribute('title', 'Theme: Light (Click to cycle)');
+      } else {
+        themeToggleBtn.textContent = '⚙️ Auto';
+        themeToggleBtn.setAttribute('title', 'Theme: Auto (Click to cycle)');
+      }
+    }
+  }
+
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener('click', () => {
+      const nextTheme =
+        currentTheme === 'auto' ? 'dark' : currentTheme === 'dark' ? 'light' : 'auto';
+      updateThemeDisplay(nextTheme);
+      if (typeof onThemeChange === 'function') {
+        onThemeChange(nextTheme);
+      }
+    });
+  }
+
+  if (themeSelect) {
+    themeSelect.addEventListener('change', () => {
+      updateThemeDisplay(themeSelect.value);
+      if (typeof onThemeChange === 'function') {
+        onThemeChange(themeSelect.value);
+      }
+    });
+  }
 
   // Command Palette Elements
   const commandPalette = overlay.querySelector('#zaix-command-palette');
@@ -539,6 +583,7 @@ export function createPanel({ onExport, onPreview, onHistory, onClose }) {
     setConversationData,
     setStatus,
     setStreaming,
-    getOptions
+    getOptions,
+    setTheme: updateThemeDisplay
   };
 }

@@ -38,6 +38,19 @@
   --zaix-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
 }
 
+:host([data-theme='light']) {
+  --zaix-primary: #4f46e5;
+  --zaix-primary-hover: #4338ca;
+  --zaix-primary-light: rgba(79, 70, 229, 0.1);
+  --zaix-primary-gradient: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+  --zaix-bg: #ffffff;
+  --zaix-text: #0f172a;
+  --zaix-muted: #64748b;
+  --zaix-border: #e2e8f0;
+  --zaix-surface: #f8fafc;
+  --zaix-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.12), 0 10px 10px -5px rgba(0, 0, 0, 0.06);
+}
+
 *,
 *::before,
 *::after {
@@ -274,6 +287,37 @@
   border-left-color: #ef4444;
   background: rgba(239, 68, 68, 0.08);
   color: #dc2626;
+}
+
+:host([data-theme='dark']) .zaix-status.error {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+}
+
+/* Custom modern scrollbars */
+.zaix-body::-webkit-scrollbar,
+#zaix-custom-messages-container::-webkit-scrollbar,
+#zaix-palette-results::-webkit-scrollbar {
+  width: 6px;
+}
+
+.zaix-body::-webkit-scrollbar-track,
+#zaix-custom-messages-container::-webkit-scrollbar-track,
+#zaix-palette-results::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.zaix-body::-webkit-scrollbar-thumb,
+#zaix-custom-messages-container::-webkit-scrollbar-thumb,
+#zaix-palette-results::-webkit-scrollbar-thumb {
+  background: var(--zaix-border);
+  border-radius: 4px;
+}
+
+.zaix-body::-webkit-scrollbar-thumb:hover,
+#zaix-custom-messages-container::-webkit-scrollbar-thumb:hover,
+#zaix-palette-results::-webkit-scrollbar-thumb:hover {
+  background: var(--zaix-muted);
 }
 
 /* Footer & Buttons */

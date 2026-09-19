@@ -148,7 +148,8 @@ export async function exportConversation(originalConversation, options = {}) {
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const fontMono = await pdfDoc.embedFont(StandardFonts.Courier);
 
-  const isDark = theme === 'dark';
+  const resolvedTheme = theme === 'auto' || !theme ? conv.theme || 'light' : theme;
+  const isDark = resolvedTheme === 'dark';
   const bgColor = isDark ? rgb(0.12, 0.12, 0.15) : rgb(1, 1, 1);
   const textColor = isDark ? rgb(0.95, 0.95, 0.95) : rgb(0.12, 0.16, 0.22);
   const mutedColor = isDark ? rgb(0.65, 0.65, 0.7) : rgb(0.42, 0.45, 0.5);

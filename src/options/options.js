@@ -43,6 +43,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   piiCheckbox.checked = settings.anonymizePii;
   historyCheckbox.checked = settings.historyOptin;
 
+  function applyTheme(theme) {
+    if (theme === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else if (theme === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+  }
+
+  applyTheme(settings.theme);
+
+  themeSelect.addEventListener('change', () => {
+    applyTheme(themeSelect.value);
+  });
+
   // Interactive token pills to easily insert template variables
   const tokenPills = document.querySelectorAll('.token-pill');
   tokenPills.forEach((pill) => {
