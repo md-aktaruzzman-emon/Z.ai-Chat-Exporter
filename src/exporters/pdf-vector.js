@@ -8,15 +8,96 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { generateFilename } from '../core/utils/filename.js';
 import { anonymizeConversation } from './pii.js';
 
+// Common math/arrow symbols transliteration for WinAnsi StandardFonts
+const SYMBOL_REPLACEMENTS = {
+  '→': '->',
+  '←': '<-',
+  '↔': '<->',
+  '⇒': '=>',
+  '⇐': '<=',
+  '≤': '<=',
+  '≥': '>=',
+  '≠': '!=',
+  '≈': '~',
+  '±': '+/-',
+  '×': 'x',
+  '÷': '/',
+  '•': '*',
+  '–': '-',
+  '—': '--'
+};
+
+const fontSupportCache = new WeakMap();
+
+/**
+ * Safely encodes text for StandardFonts without throwing WinAnsi encoding errors.
+ * Replaces unencodable characters with transliterations or safe fallbacks.
+ * @param {string} str
+ * @param {import('pdf-lib').PDFFont} font
+ * @returns {string}
+ */
+export function safeWinAnsiText(str, font) {
+  if (!str) return '';
+  let replaced = String(str);
+  for (const [sym, rep] of Object.entries(SYMBOL_REPLACEMENTS)) {
+    if (replaced.includes(sym)) {
+      replaced = replaced.split(sym).join(rep);
+    }
+  }
+
+  let charCache = fontSupportCache.get(font);
+  if (!charCache) {
+    charCache = new Map();
+    fontSupportCache.set(font, charCache);
+  }
+
+  let result = '';
+  for (const char of replaced) {
+    let supported = charCache.get(char);
+    if (supported === undefined) {
+      try {
+        font.encodeText(char);
+        supported = true;
+      } catch {
+        supported = false;
+      }
+      charCache.set(char, supported);
+    }
+    result += supported ? char : char.charCodeAt(0) > 127 ? '?' : ' ';
+  }
+  return result;
+}
+
 /**
  * Splits text into lines that fit within a maximum width given a font and size.
+ * Automatically breaks words that are wider than maxWidth to prevent clipping.
  */
 function wrapText(text, maxWidth, font, fontSize) {
-  const words = text.split(/\s+/);
+  if (!text) return [];
+  const safeStr = safeWinAnsiText(text, font);
+  const words = safeStr.split(/\s+/);
   const lines = [];
   let currentLine = '';
 
-  for (const word of words) {
+  for (let word of words) {
+    // If a single word is wider than maxWidth, break it into chunks
+    while (font.widthOfTextAtSize(word, fontSize) > maxWidth) {
+      let sliceLen = Math.max(1, Math.floor(word.length * 0.7));
+      while (
+        sliceLen > 1 &&
+        font.widthOfTextAtSize(word.substring(0, sliceLen), fontSize) > maxWidth
+      ) {
+        sliceLen--;
+      }
+      const chunk = word.substring(0, sliceLen);
+      if (currentLine) {
+        lines.push(currentLine);
+        currentLine = '';
+      }
+      lines.push(chunk);
+      word = word.substring(sliceLen);
+    }
+
     const testLine = currentLine ? `${currentLine} ${word}` : word;
     const testWidth = font.widthOfTextAtSize(testLine, fontSize);
     if (testWidth <= maxWidth) {
@@ -109,7 +190,7 @@ export async function exportConversation(originalConversation, options = {}) {
 
   // Draw Title
   ensureSpace(40);
-  page.drawText(conv.title || 'Z.ai Conversation', {
+  page.drawText(safeWinAnsiText(conv.title || 'Z.ai Conversation', fontBold), {
     x: margin,
     y: y - 20,
     size: 18,
@@ -120,7 +201,7 @@ export async function exportConversation(originalConversation, options = {}) {
 
   // Metadata Header
   const dateStr = new Date(conv.createdAt).toLocaleString();
-  page.drawText(`Model: ${conv.model} | Date: ${dateStr}`, {
+  page.drawText(safeWinAnsiText(`Model: ${conv.model} | Date: ${dateStr}`, fontRegular), {
     x: margin,
     y: y - 10,
     size: 9,
@@ -154,7 +235,7 @@ export async function exportConversation(originalConversation, options = {}) {
       const msg = conv.messages[i];
       const snippet = (msg.text || '').substring(0, 45).replace(/\n/g, ' ');
       ensureSpace(14);
-      page.drawText(`#${i + 1} [${msg.role}]: ${snippet}...`, {
+      page.drawText(safeWinAnsiText(`#${i + 1} [${msg.role}]: ${snippet}...`, fontRegular), {
         x: margin + 10,
         y: y - 10,
         size: 8.5,
@@ -174,7 +255,7 @@ export async function exportConversation(originalConversation, options = {}) {
     ensureSpace(30);
 
     // Speaker Header
-    page.drawText(roleLabel, {
+    page.drawText(safeWinAnsiText(roleLabel, fontBold), {
       x: margin,
       y: y - 12,
       size: fontSize + 1,
@@ -205,7 +286,8 @@ export async function exportConversation(originalConversation, options = {}) {
           y -= 8;
           for (const line of codeLines) {
             ensureSpace(14);
-            const truncated = line.length > 80 ? line.substring(0, 80) + '...' : line;
+            const safeLine = safeWinAnsiText(line, fontMono);
+            const truncated = safeLine.length > 80 ? safeLine.substring(0, 80) + '...' : safeLine;
             page.drawText(truncated, {
               x: margin + 8,
               y: y - 10,
@@ -218,7 +300,7 @@ export async function exportConversation(originalConversation, options = {}) {
           y -= 8;
         } else if (block.kind === 'math') {
           ensureSpace(20);
-          page.drawText(`[Formula: ${block.tex}]`, {
+          page.drawText(safeWinAnsiText(`[Formula: ${block.tex}]`, fontRegular), {
             x: margin + 10,
             y: y - 12,
             size: fontSize,
@@ -288,7 +370,7 @@ export async function exportConversation(originalConversation, options = {}) {
     const p = pdfDoc.getPage(i);
 
     if (headerText) {
-      p.drawText(headerText, {
+      p.drawText(safeWinAnsiText(headerText, fontRegular), {
         x: margin,
         y: pageHeight - margin / 2,
         size: 8,
@@ -308,7 +390,7 @@ export async function exportConversation(originalConversation, options = {}) {
     });
 
     if (footerText) {
-      p.drawText(footerText, {
+      p.drawText(safeWinAnsiText(footerText, fontRegular), {
         x: margin,
         y: margin / 2,
         size: 8,

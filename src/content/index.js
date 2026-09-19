@@ -115,10 +115,11 @@ async function handleExport(options) {
     panelInstance.setStatus(t('statusScraping'));
 
     const conversation = await scrapeConversation({
+      range: options.range,
+      selectedIndices: options.selectedIndices,
       includeThinking: options.includeThinking,
       includeArtifacts: options.includeArtifacts,
-      includeCitations: options.includeCitations,
-      selectedIndices: options.selectedIndices
+      includeCitations: options.includeCitations
     });
 
     if (options.title) {
@@ -165,6 +166,8 @@ async function handlePreview(options) {
   try {
     panelInstance.setStatus('Generating preview...');
     const conversation = await scrapeConversation({
+      range: options.range,
+      selectedIndices: options.selectedIndices,
       includeThinking: options.includeThinking,
       includeArtifacts: options.includeArtifacts,
       includeCitations: options.includeCitations
@@ -233,5 +236,14 @@ onThreadChange(() => {
   // Re-verify UI is attached and update stats if panel is open
   if (!document.getElementById('zaix-extension-root')) {
     initContainer();
+  } else if (panelInstance && !panelInstance.element.classList.contains('hidden')) {
+    // If panel is currently visible, refresh conversation data to avoid stale data across SPA navigation
+    scrapeConversation({ waitForStream: false })
+      .then((c) => {
+        if (panelInstance && !panelInstance.element.classList.contains('hidden')) {
+          panelInstance.setConversationData(c);
+        }
+      })
+      .catch(() => {});
   }
 });

@@ -81,7 +81,7 @@ export function createHistoryDrawer({ onClose, onReDownload }) {
         const dateStr = new Date(item.date).toLocaleString();
         itemEl.innerHTML = `
           <div style="flex: 1; min-width: 0;">
-            <div style="font-weight: 600; font-size: 13px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${item.title || 'Untitled'}</div>
+            <div class="zaix-hist-title" style="font-weight: 600; font-size: 13px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;"></div>
             <div style="font-size: 11px; color: var(--zaix-muted);">${item.format.toUpperCase()} &bull; ${dateStr} &bull; ${(item.size / 1024).toFixed(1)} KB</div>
           </div>
           <div style="display: flex; gap: 6px;">
@@ -89,6 +89,7 @@ export function createHistoryDrawer({ onClose, onReDownload }) {
             <button type="button" class="zaix-btn zaix-delete-hist-btn" data-id="${item.id}" style="padding: 4px 8px; font-size: 12px; color: #dc2626;">&times;</button>
           </div>
         `;
+        itemEl.querySelector('.zaix-hist-title').textContent = item.title || 'Untitled';
 
         const deleteBtn = itemEl.querySelector('.zaix-delete-hist-btn');
         deleteBtn.addEventListener('click', async () => {

@@ -425,4 +425,105 @@ describe('7. Exporters File Generation', () => {
     const headerStr = String.fromCharCode(...header);
     expect(headerStr).toBe('%PDF-');
   });
+
+  it('safely handles Unicode, Bengali text, emojis, and math arrows in Vector PDF without WinAnsi errors', async () => {
+    const unicodeConv = createEmptyConversation();
+    unicodeConv.title = 'বাংলা কথোপকথন & Emojis 🚀';
+    unicodeConv.messages = [
+      {
+        index: 0,
+        role: 'user',
+        text: 'কী খবর? Hello world! x → y and a ≤ b 😊',
+        html: '<p>কী খবর? Hello world! x → y and a ≤ b 😊</p>',
+        blocks: [
+          { kind: 'paragraph', text: 'কী খবর? Hello world! x → y and a ≤ b 😊' },
+          { kind: 'code', language: 'python', code: 'print("বাংলা 🚀")' }
+        ]
+      }
+    ];
+
+    const res = await vectorPdfExporter.exportConversation(unicodeConv, {
+      headerText: 'শীর্ষচরণ • Header',
+      footerText: 'পাদচরণ • Footer'
+    });
+    expect(res.blob.size).toBeGreaterThan(500);
+    const buffer = await blobToArrayBuffer(res.blob);
+    const headerStr = String.fromCharCode(...new Uint8Array(buffer).subarray(0, 5));
+    expect(headerStr).toBe('%PDF-');
+  });
+
+  it('generates multi-backtick code fences in Markdown when code contains triple backticks', async () => {
+    const codeConv = createEmptyConversation();
+    codeConv.title = 'Markdown Code Fences';
+    codeConv.messages = [
+      {
+        index: 0,
+        role: 'assistant',
+        text: 'Nested code sample',
+        blocks: [
+          {
+            kind: 'code',
+            language: 'markdown',
+            code: '```javascript\nconsole.log("nested");\n```'
+          }
+        ]
+      }
+    ];
+
+    const res = await markdownExporter.exportConversation(codeConv);
+    expect(res.previewText).toContain('````markdown');
+    expect(res.previewText).toContain('```javascript\nconsole.log("nested");\n```');
+    expect(res.previewText).toContain('````\n');
+  });
+
+  it('escapes code blocks containing script and HTML tags in HTML export', async () => {
+    const evilConv = createEmptyConversation();
+    evilConv.title = 'Code Injection Test';
+    evilConv.messages = [
+      {
+        index: 0,
+        role: 'user',
+        text: 'Check this code',
+        blocks: [
+          {
+            kind: 'code',
+            language: 'html',
+            code: '<script>alert("xss")</script><div class="test">content</div>'
+          },
+          {
+            kind: 'thinking',
+            text: 'Thinking with <b>tags</b> & <script>alert(1)</script>'
+          },
+          {
+            kind: 'citation',
+            title: 'Malicious citation <img src=x>',
+            url: 'javascript:alert(1)',
+            snippet: 'Dangerous <script>'
+          }
+        ]
+      }
+    ];
+
+    const res = await htmlExporter.exportConversation(evilConv);
+    expect(res.previewHtml).toContain('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
+    expect(res.previewHtml).toContain('&lt;div class=&quot;test&quot;&gt;content&lt;/div&gt;');
+    expect(res.previewHtml).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    // Unsafe javascript: protocol should be replaced with #
+    expect(res.previewHtml).not.toContain('href="javascript:');
+    expect(res.previewHtml).toContain('href="#"');
+  });
+
+  it('correctly classifies role using data-message-author-role and aliases', () => {
+    const el1 = document.createElement('div');
+    el1.setAttribute('data-message-author-role', 'human');
+    expect(classifyRole(el1)).toBe('user');
+
+    const el2 = document.createElement('div');
+    el2.setAttribute('data-message-author-role', 'bot');
+    expect(classifyRole(el2)).toBe('assistant');
+
+    const el3 = document.createElement('div');
+    el3.setAttribute('data-message-author-role', 'tool');
+    expect(classifyRole(el3)).toBe('tool');
+  });
 });

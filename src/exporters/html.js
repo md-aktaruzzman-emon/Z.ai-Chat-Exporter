@@ -5,8 +5,18 @@
  */
 
 import { generateFilename } from '../core/utils/filename.js';
-import { sanitizeHtml } from '../core/sanitize.js';
+import { sanitizeHtml, isSafeUrl } from '../core/sanitize.js';
 import { anonymizeConversation } from './pii.js';
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 /**
  * Builds standalone HTML with embedded styles.
@@ -29,21 +39,22 @@ function buildStandaloneHtml(conv, theme) {
     if (Array.isArray(m.blocks) && m.blocks.length > 0) {
       for (const block of m.blocks) {
         if (block.kind === 'code') {
-          contentHtml += `<pre style="background:#1e1e2e; color:#cdd6f4; padding:12px; border-radius:6px; overflow-x:auto; font-size:13px;"><code>${block.code}</code></pre>`;
+          contentHtml += `<pre style="background:#1e1e2e; color:#cdd6f4; padding:12px; border-radius:6px; overflow-x:auto; font-size:13px;"><code>${escapeHtml(block.code)}</code></pre>`;
         } else if (block.kind === 'math') {
-          contentHtml += `<div style="font-family:serif; font-style:italic; padding:8px 0; color:#4f46e5;">$$ ${block.tex} $$</div>`;
+          contentHtml += `<div style="font-family:serif; font-style:italic; padding:8px 0; color:#4f46e5;">$$ ${escapeHtml(block.tex)} $$</div>`;
         } else if (block.kind === 'thinking') {
-          contentHtml += `<details style="margin:8px 0; padding:8px 12px; background:rgba(0,0,0,0.05); border-radius:6px;"><summary style="cursor:pointer; color:#6b7280; font-size:12px;">Thinking Process</summary><div style="margin-top:6px; font-size:13px; color:#6b7280;">${block.text}</div></details>`;
+          contentHtml += `<details style="margin:8px 0; padding:8px 12px; background:rgba(0,0,0,0.05); border-radius:6px;"><summary style="cursor:pointer; color:#6b7280; font-size:12px;">Thinking Process</summary><div style="margin-top:6px; font-size:13px; color:#6b7280;">${escapeHtml(block.text)}</div></details>`;
         } else if (block.kind === 'table') {
           contentHtml += `<div style="overflow-x:auto; margin:10px 0;">${block.html}</div>`;
         } else if (block.kind === 'citation') {
-          contentHtml += `<div style="font-size:12px; color:#2563eb; margin:4px 0;">🔗 <a href="${block.url}" target="_blank" style="color:inherit;">${block.title}</a> ${block.snippet ? `— <em>${block.snippet}</em>` : ''}</div>`;
+          const safeHref = isSafeUrl(block.url) ? block.url : '#';
+          contentHtml += `<div style="font-size:12px; color:#2563eb; margin:4px 0;">🔗 <a href="${safeHref}" target="_blank" rel="noopener noreferrer" style="color:inherit;">${escapeHtml(block.title)}</a> ${block.snippet ? `— <em>${escapeHtml(block.snippet)}</em>` : ''}</div>`;
         } else {
-          contentHtml += block.html || `<p>${block.text}</p>`;
+          contentHtml += block.html || `<p>${escapeHtml(block.text)}</p>`;
         }
       }
     } else {
-      contentHtml = m.html || `<p>${m.text}</p>`;
+      contentHtml = m.html || `<p>${escapeHtml(m.text)}</p>`;
     }
 
     messagesHtml += `

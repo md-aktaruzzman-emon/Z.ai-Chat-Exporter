@@ -14,11 +14,13 @@ import { sanitizeHtml } from '../core/sanitize.js';
  * @returns {'user'|'assistant'|'system'|'tool'}
  */
 export function classifyRole(el) {
-  // 1. data-role attribute
-  const dataRole = el.getAttribute('data-role');
+  // 1. data-role attribute or data-message-author-role
+  const dataRole = el.getAttribute('data-role') || el.getAttribute('data-message-author-role');
   if (dataRole) {
     const r = dataRole.toLowerCase();
-    if (['user', 'assistant', 'system', 'tool'].includes(r)) {
+    if (['user', 'human', 'assistant', 'bot', 'system', 'tool'].includes(r)) {
+      if (r === 'human') return 'user';
+      if (r === 'bot') return 'assistant';
       return /** @type {'user'|'assistant'|'system'|'tool'} */ (r);
     }
   }
@@ -316,6 +318,19 @@ export async function scrapeConversation(options = {}) {
     throw new ExportError('LOCATE_FAILED', 'Could not find conversation messages in current DOM');
   }
 
+  // Detect which message is visible in viewport before scrolling if 'from_here' is requested
+  let fromHereStartIndex = 0;
+  if (range === 'from_here' && typeof window !== 'undefined') {
+    const vh = window.innerHeight || document.documentElement.clientHeight || 800;
+    const idx = loc.messageBubbles.findIndex((b) => {
+      const r = b.getBoundingClientRect();
+      return r.bottom > 0 && r.top < vh;
+    });
+    if (idx !== -1) {
+      fromHereStartIndex = idx;
+    }
+  }
+
   if (loc.threadContainer) {
     await unvirtualize(loc.threadContainer);
   }
@@ -366,6 +381,8 @@ export async function scrapeConversation(options = {}) {
   if (Array.isArray(selectedIndices) && selectedIndices.length > 0) {
     const indexSet = new Set(selectedIndices);
     filteredMessages = messages.filter((m) => indexSet.has(m.index));
+  } else if (range === 'from_here') {
+    filteredMessages = messages.slice(fromHereStartIndex);
   } else if (range && Array.isArray(range) && range.length === 2) {
     const [start, end] = range;
     filteredMessages = messages.slice(start, end + 1);

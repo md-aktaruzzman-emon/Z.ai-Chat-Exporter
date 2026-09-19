@@ -6,6 +6,7 @@
 
 import html2canvas from 'html2canvas';
 import { generateFilename } from '../core/utils/filename.js';
+import { sanitizeHtml } from '../core/sanitize.js';
 import { anonymizeConversation } from './pii.js';
 
 /**
@@ -23,16 +24,16 @@ function buildPngHtml(conv, theme) {
     const role = isUser ? 'User' : conv.model || 'Z.ai';
     messagesHtml += `
       <div style="margin-bottom: 20px; padding: 14px 18px; border-radius: 8px; background: ${isUser ? (isDark ? '#24283b' : '#f1f5f9') : isDark ? '#1f2335' : '#ffffff'}; border: 1px solid ${border};">
-        <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px; color: ${isUser ? '#7aa2f7' : '#9ece6a'};">${role}</div>
-        <div style="font-size: 14px; line-height: 1.6;">${m.html || m.text}</div>
+        <div style="font-weight: 600; font-size: 14px; margin-bottom: 8px; color: ${isUser ? '#7aa2f7' : '#9ece6a'};">${sanitizeHtml(role)}</div>
+        <div style="font-size: 14px; line-height: 1.6;">${m.html || sanitizeHtml(m.text || '')}</div>
       </div>
     `;
   }
 
   return `
     <div style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: ${bg}; color: ${text}; padding: 30px; width: 750px;">
-      <h1 style="font-size: 22px; margin-bottom: 8px; border-bottom: 2px solid ${border}; padding-bottom: 8px;">${conv.title}</h1>
-      <div style="font-size: 12px; opacity: 0.7; margin-bottom: 24px;">Model: ${conv.model} &bull; ${new Date(conv.createdAt).toLocaleString()}</div>
+      <h1 style="font-size: 22px; margin-bottom: 8px; border-bottom: 2px solid ${border}; padding-bottom: 8px;">${sanitizeHtml(conv.title)}</h1>
+      <div style="font-size: 12px; opacity: 0.7; margin-bottom: 24px;">Model: ${sanitizeHtml(conv.model)} &bull; ${new Date(conv.createdAt).toLocaleString()}</div>
       ${messagesHtml}
     </div>
   `;

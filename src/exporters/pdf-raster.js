@@ -6,6 +6,7 @@
 
 import html2pdf from 'html2pdf.js';
 import { generateFilename } from '../core/utils/filename.js';
+import { sanitizeHtml } from '../core/sanitize.js';
 import { anonymizeConversation } from './pii.js';
 
 /**
@@ -25,16 +26,16 @@ function buildRenderHtml(conv, theme) {
     const roleName = isUser ? 'You' : conv.model || 'Z.ai';
     messagesHtml += `
       <div style="margin-bottom: 20px; padding: 14px; border-radius: 8px; background: ${isUser ? userBg : botBg}; border: 1px solid ${border}; page-break-inside: avoid;">
-        <div style="font-weight: bold; margin-bottom: 8px; color: ${isUser ? '#4f46e5' : '#059669'};">${roleName}</div>
-        <div style="line-height: 1.6; font-size: 13px;">${m.html || m.text}</div>
+        <div style="font-weight: bold; margin-bottom: 8px; color: ${isUser ? '#4f46e5' : '#059669'};">${sanitizeHtml(roleName)}</div>
+        <div style="line-height: 1.6; font-size: 13px;">${m.html || sanitizeHtml(m.text || '')}</div>
       </div>
     `;
   }
 
   return `
     <div style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: ${bg}; color: ${text}; padding: 30px; width: 750px;">
-      <h1 style="font-size: 22px; margin-bottom: 6px; border-bottom: 2px solid ${border}; padding-bottom: 10px;">${conv.title}</h1>
-      <div style="font-size: 11px; color: #888; margin-bottom: 24px;">Model: ${conv.model} | Exported: ${new Date(conv.createdAt).toLocaleString()}</div>
+      <h1 style="font-size: 22px; margin-bottom: 6px; border-bottom: 2px solid ${border}; padding-bottom: 10px;">${sanitizeHtml(conv.title)}</h1>
+      <div style="font-size: 11px; color: #888; margin-bottom: 24px;">Model: ${sanitizeHtml(conv.model)} | Exported: ${new Date(conv.createdAt).toLocaleString()}</div>
       ${messagesHtml}
     </div>
   `;

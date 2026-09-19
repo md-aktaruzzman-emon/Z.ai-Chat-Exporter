@@ -105,7 +105,15 @@ export async function exportConversation(originalConversation, options = {}) {
             );
           }
         } else if (block.kind === 'code') {
-          lines.push(`\`\`\`${block.language || ''}\n${block.code}\n\`\`\`\n`);
+          const backtickMatches = (block.code || '').match(/`{3,}/g);
+          let fenceLen = 3;
+          if (backtickMatches) {
+            for (const m of backtickMatches) {
+              if (m.length >= fenceLen) fenceLen = m.length + 1;
+            }
+          }
+          const fence = '`'.repeat(fenceLen);
+          lines.push(`${fence}${block.language || ''}\n${block.code}\n${fence}\n`);
         } else if (block.kind === 'math') {
           if (block.displayMode) {
             lines.push(`\n$$\n${block.tex}\n$$\n`);

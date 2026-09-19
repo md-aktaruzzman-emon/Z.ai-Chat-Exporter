@@ -460,10 +460,20 @@ export function createPanel({ onExport, onPreview, onHistory, onClose }) {
         row.className = 'zaix-checkbox-label';
         row.style.fontSize = '12px';
         const snippet = (m.text || '').substring(0, 60);
-        row.innerHTML = `
-          <input type="checkbox" data-index="${m.index}" checked />
-          <span><strong>#${m.index + 1} (${m.role}):</strong> ${snippet}...</span>
-        `;
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.setAttribute('data-index', String(m.index));
+        cb.checked = true;
+
+        const textSpan = document.createElement('span');
+        const strong = document.createElement('strong');
+        strong.textContent = `#${m.index + 1} (${m.role}): `;
+        textSpan.appendChild(strong);
+        textSpan.appendChild(document.createTextNode(`${snippet}...`));
+
+        row.appendChild(cb);
+        row.appendChild(textSpan);
         customMessagesContainer.appendChild(row);
       });
     }
