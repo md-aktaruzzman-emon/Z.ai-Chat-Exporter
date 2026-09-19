@@ -7,124 +7,276 @@
     <link rel="stylesheet" href="./options.css" />
   </head>
   <body>
-    <div class="options-container">
+    <div class="options-layout">
+      <!-- Top Navigation & Branding -->
       <header class="options-header">
         <div class="brand">
-          <img src="../assets/icons/48.png" alt="Z.ai Exporter" width="36" height="36" />
-          <div>
-            <h1>Z.ai Chat Exporter Settings</h1>
+          <div class="logo-wrapper">
+            <img src="../assets/icons/48.png" alt="Z.ai Exporter" width="36" height="36" />
+          </div>
+          <div class="brand-text">
+            <div class="title-row">
+              <h1>Z.ai Chat Exporter</h1>
+              <span class="badge">v2.0.0</span>
+            </div>
             <p class="subtitle">
-              Configure export defaults, privacy scrubbing, and custom selector profiles
+              Personalize your export presets, privacy filters, and browser integrations
             </p>
           </div>
         </div>
-        <span class="version-tag">Version 2.0.0</span>
+        <div class="header-actions">
+          <a href="https://chat.z.ai" target="_blank" rel="noopener noreferrer" class="link-btn">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+            Open chat.z.ai
+          </a>
+        </div>
       </header>
 
       <main class="options-body">
-        <!-- Default Settings Form -->
-        <section class="settings-card">
-          <h2>Export Defaults</h2>
-
-          <div class="form-row">
-            <label for="opt-filename-template">Default Filename Template</label>
-            <input
-              type="text"
-              id="opt-filename-template"
-              class="form-input"
-              value="{{title}}_{{date}}"
-            />
-            <div class="help-text">
-              Tokens: {{title}}, {{date}}, {{time}}, {{model}}, {{format}}
+        <!-- Export Defaults Card -->
+        <section class="card">
+          <div class="card-header">
+            <div class="card-icon bg-indigo">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+            </div>
+            <div>
+              <h2>Export Defaults</h2>
+              <p class="card-desc">
+                Configure default document formatting and file naming patterns
+              </p>
             </div>
           </div>
 
-          <div class="form-grid">
-            <div class="form-row">
-              <label for="opt-default-theme">Default Theme</label>
-              <select id="opt-default-theme" class="form-select">
-                <option value="auto">Auto (Page Theme)</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </select>
+          <div class="card-content">
+            <div class="form-group">
+              <label for="opt-filename-template">Default Filename Template</label>
+              <div class="input-with-hint">
+                <input
+                  type="text"
+                  id="opt-filename-template"
+                  class="form-input"
+                  value="{{title}}_{{date}}"
+                  placeholder="{{title}}_{{date}}"
+                />
+              </div>
+              <div class="token-pills-row">
+                <span class="token-hint">Click tokens to insert:</span>
+                <button type="button" class="token-pill" data-token="{{title}}">{{title}}</button>
+                <button type="button" class="token-pill" data-token="{{date}}">{{date}}</button>
+                <button type="button" class="token-pill" data-token="{{time}}">{{time}}</button>
+                <button type="button" class="token-pill" data-token="{{model}}">{{model}}</button>
+                <button type="button" class="token-pill" data-token="{{format}}">{{format}}</button>
+              </div>
             </div>
 
-            <div class="form-row">
-              <label for="opt-pdf-engine">Default PDF Engine</label>
-              <select id="opt-pdf-engine" class="form-select">
-                <option value="vector">Vector (Selectable Text)</option>
-                <option value="raster">Raster (html2pdf)</option>
-              </select>
-            </div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="opt-default-theme">Default Theme</label>
+                <div class="select-wrapper">
+                  <select id="opt-default-theme" class="form-select">
+                    <option value="auto">Auto (Match page theme)</option>
+                    <option value="light">Light Mode</option>
+                    <option value="dark">Dark Mode</option>
+                  </select>
+                </div>
+              </div>
 
-            <div class="form-row">
-              <label for="opt-md-preset">Default Markdown Preset</label>
-              <select id="opt-md-preset" class="form-select">
-                <option value="github">GitHub Flavored Markdown</option>
-                <option value="obsidian">Obsidian Callouts & Tags</option>
-                <option value="notion">Notion Paste Safe</option>
-              </select>
+              <div class="form-group">
+                <label for="opt-pdf-engine">Default PDF Engine</label>
+                <div class="select-wrapper">
+                  <select id="opt-pdf-engine" class="form-select">
+                    <option value="vector">Vector (Fast & Selectable Text)</option>
+                    <option value="raster">Raster (HTML DOM Snapshot)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="opt-md-preset">Default Markdown Preset</label>
+                <div class="select-wrapper">
+                  <select id="opt-md-preset" class="form-select">
+                    <option value="github">GitHub Flavored (GFM)</option>
+                    <option value="obsidian">Obsidian (Callouts & Tags)</option>
+                    <option value="notion">Notion Compatible</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Privacy & Features Card -->
+        <section class="card">
+          <div class="card-header">
+            <div class="card-icon bg-emerald">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+            </div>
+            <div>
+              <h2>Privacy & Integrations</h2>
+              <p class="card-desc">Control automated sanitization and browser integrations</p>
+            </div>
+          </div>
+
+          <div class="card-content">
+            <div class="toggle-list">
+              <label class="toggle-item" for="opt-anonymize-pii">
+                <div class="toggle-text">
+                  <span class="toggle-title">Anonymize PII by default</span>
+                  <span class="toggle-desc"
+                    >Automatically scrub emails, phone numbers, API keys, and auth tokens from
+                    exports</span
+                  >
+                </div>
+                <div class="switch">
+                  <input type="checkbox" id="opt-anonymize-pii" />
+                  <span class="slider"></span>
+                </div>
+              </label>
+
+              <label class="toggle-item" for="opt-history-optin">
+                <div class="toggle-text">
+                  <span class="toggle-title">Enable Local Export History</span>
+                  <span class="toggle-desc"
+                    >Store past exports in local browser IndexedDB (up to 200 records, never sent
+                    anywhere)</span
+                  >
+                </div>
+                <div class="switch">
+                  <input type="checkbox" id="opt-history-optin" checked />
+                  <span class="slider"></span>
+                </div>
+              </label>
+
+              <label class="toggle-item" for="opt-context-menu">
+                <div class="toggle-text">
+                  <span class="toggle-title">Enable Browser Context Menus</span>
+                  <span class="toggle-desc"
+                    >Adds right-click options on chat.z.ai to quickly export conversations with 1
+                    click</span
+                  >
+                </div>
+                <div class="switch">
+                  <input type="checkbox" id="opt-context-menu" />
+                  <span class="slider"></span>
+                </div>
+              </label>
             </div>
           </div>
         </section>
 
-        <!-- Privacy & Opt-ins -->
-        <section class="settings-card">
-          <h2>Privacy & Features</h2>
-
-          <label class="checkbox-row">
-            <input type="checkbox" id="opt-anonymize-pii" />
-            <div>
-              <strong>Anonymize PII by default</strong>
-              <div class="help-text">
-                Automatically scrub email addresses, phone numbers, API keys, and bearer tokens.
-              </div>
+        <!-- Selector Profiles Card -->
+        <section class="card">
+          <div class="card-header">
+            <div class="card-icon bg-amber">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
+              </svg>
             </div>
-          </label>
-
-          <label class="checkbox-row">
-            <input type="checkbox" id="opt-history-optin" checked />
             <div>
-              <strong>Enable Local Export History</strong>
-              <div class="help-text">
-                Save recent exports into local IndexedDB (up to 200 items). Blobs &gt; 5MB keep
-                metadata only.
-              </div>
+              <h2>DOM Selector Profiles (Advanced)</h2>
+              <p class="card-desc">
+                Backup, share, or import custom DOM selector overrides if Z.ai updates its layout
+                classes
+              </p>
             </div>
-          </label>
+          </div>
 
-          <label class="checkbox-row">
-            <input type="checkbox" id="opt-context-menu" />
-            <div>
-              <strong>Enable Browser Context Menus</strong>
-              <div class="help-text">
-                Requests optional permission to add right-click quick export options on chat.z.ai.
-              </div>
+          <div class="card-content">
+            <div class="profile-actions">
+              <button type="button" id="btn-export-profile" class="btn btn-secondary">
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Export Profile JSON
+              </button>
+              <button type="button" id="btn-import-profile" class="btn btn-secondary">
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                Import Profile JSON
+              </button>
+              <input type="file" id="file-import-profile" accept=".json" style="display: none" />
             </div>
-          </label>
-        </section>
-
-        <!-- Selector Profile Manager -->
-        <section class="settings-card">
-          <h2>Selector Profiles (Advanced)</h2>
-          <p class="help-text">Manage DOM selector overrides if Z.ai updates its layout classes.</p>
-
-          <div class="profile-actions">
-            <button type="button" id="btn-export-profile" class="btn btn-secondary">
-              Export Profile JSON
-            </button>
-            <button type="button" id="btn-import-profile" class="btn btn-secondary">
-              Import Profile JSON
-            </button>
-            <input type="file" id="file-import-profile" accept=".json" style="display: none" />
           </div>
         </section>
 
-        <div class="footer-actions">
-          <button type="button" id="btn-save-settings" class="btn btn-primary">
+        <!-- Save Floating Bar -->
+        <div class="save-bar">
+          <div class="save-info">
+            <span id="save-status" class="save-status"></span>
+          </div>
+          <button type="button" id="btn-save-settings" class="btn btn-primary btn-save">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+              <polyline points="17 21 17 13 7 13 7 21" />
+              <polyline points="7 3 7 8 15 8" />
+            </svg>
             Save Settings
           </button>
-          <span id="save-status" class="save-status"></span>
         </div>
       </main>
     </div>

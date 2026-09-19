@@ -6,27 +6,36 @@
 :host {
   --zaix-primary: #4f46e5;
   --zaix-primary-hover: #4338ca;
+  --zaix-primary-light: rgba(79, 70, 229, 0.1);
+  --zaix-primary-gradient: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
   --zaix-bg: #ffffff;
-  --zaix-text: #1f2937;
-  --zaix-muted: #6b7280;
-  --zaix-border: #e5e7eb;
-  --zaix-surface: #f9fafb;
-  --zaix-focus-ring: 0 0 0 3px rgba(79, 70, 229, 0.4);
-  --zaix-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-  --zaix-radius: 8px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  font-size: 14px;
+  --zaix-text: #0f172a;
+  --zaix-muted: #64748b;
+  --zaix-border: #e2e8f0;
+  --zaix-surface: #f8fafc;
+  --zaix-focus-ring: 0 0 0 3px rgba(79, 70, 229, 0.3);
+  --zaix-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.12), 0 10px 10px -5px rgba(0, 0, 0, 0.06);
+  --zaix-radius: 12px;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', Helvetica, Arial, sans-serif;
+  font-size: 13.5px;
   line-height: 1.5;
   color: var(--zaix-text);
   box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
 }
 
 :host([data-theme='dark']) {
-  --zaix-bg: #1e1e24;
-  --zaix-text: #f3f4f6;
-  --zaix-muted: #9ca3af;
-  --zaix-border: #374151;
-  --zaix-surface: #272730;
+  --zaix-primary: #6366f1;
+  --zaix-primary-hover: #4f46e5;
+  --zaix-primary-light: rgba(99, 102, 241, 0.15);
+  --zaix-primary-gradient: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  --zaix-bg: #111827;
+  --zaix-text: #f8fafc;
+  --zaix-muted: #94a3b8;
+  --zaix-border: #1f2937;
+  --zaix-surface: #1a2234;
+  --zaix-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
 }
 
 *,
@@ -35,7 +44,7 @@
   box-sizing: inherit;
 }
 
-/* Floating Action Button */
+/* Floating Action Button (FAB) */
 .zaix-fab {
   position: fixed;
   bottom: 24px;
@@ -43,29 +52,29 @@
   width: 52px;
   height: 52px;
   border-radius: 50%;
-  background-color: var(--zaix-primary);
+  background: var(--zaix-primary-gradient);
   color: #ffffff;
   border: none;
-  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4);
+  box-shadow: 0 6px 18px rgba(79, 70, 229, 0.45);
   cursor: grab;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 2147483647;
   transition:
-    transform 0.15s ease,
-    background-color 0.15s ease;
+    transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.2s ease;
   user-select: none;
 }
 
 .zaix-fab:hover {
-  background-color: var(--zaix-primary-hover);
-  transform: scale(1.05);
+  transform: scale(1.08);
+  box-shadow: 0 8px 24px rgba(79, 70, 229, 0.55);
 }
 
 .zaix-fab:active {
   cursor: grabbing;
-  transform: scale(0.95);
+  transform: scale(0.94);
 }
 
 .zaix-fab:focus-visible {
@@ -79,15 +88,16 @@
   fill: currentColor;
 }
 
-/* Export Panel Modal */
+/* Modal Overlay with Glassmorphism */
 .zaix-panel-overlay {
   position: fixed;
   top: 0;
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
+  background-color: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -100,41 +110,60 @@
   display: none;
 }
 
+/* Main Panel Dialog */
 .zaix-panel {
   background: var(--zaix-bg);
   border: 1px solid var(--zaix-border);
   border-radius: var(--zaix-radius);
-  width: 460px;
-  max-width: 92vw;
+  width: 480px;
+  max-width: 94vw;
   max-height: 88vh;
   display: flex;
   flex-direction: column;
   box-shadow: var(--zaix-shadow);
   overflow: hidden;
+  animation: zaix-modal-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+@keyframes zaix-modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Header */
 .zaix-header {
-  padding: 14px 18px;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--zaix-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  background: var(--zaix-bg);
 }
 
 .zaix-title {
-  font-weight: 600;
+  font-weight: 700;
   font-size: 16px;
+  letter-spacing: -0.01em;
   margin: 0;
+  color: var(--zaix-text);
 }
 
 .zaix-close-btn {
   background: transparent;
   border: none;
-  font-size: 18px;
+  font-size: 20px;
+  line-height: 1;
   cursor: pointer;
   color: var(--zaix-muted);
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 4px 8px;
+  transition: all 0.15s ease;
 }
 
 .zaix-close-btn:hover {
@@ -142,8 +171,9 @@
   background: var(--zaix-surface);
 }
 
+/* Panel Body */
 .zaix-body {
-  padding: 16px 18px;
+  padding: 18px 20px;
   overflow-y: auto;
   flex: 1;
   display: flex;
@@ -151,6 +181,7 @@
   gap: 14px;
 }
 
+/* Forms & Inputs */
 .zaix-form-group {
   display: flex;
   flex-direction: column;
@@ -158,35 +189,40 @@
 }
 
 .zaix-label {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--zaix-text);
 }
 
 .zaix-input,
 .zaix-select {
-  padding: 8px 10px;
+  padding: 9px 12px;
   border: 1px solid var(--zaix-border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--zaix-surface);
   color: var(--zaix-text);
   font-size: 13px;
+  font-family: inherit;
+  transition: all 0.15s ease;
 }
 
 .zaix-input:focus,
 .zaix-select:focus {
   outline: none;
+  background: var(--zaix-bg);
   border-color: var(--zaix-primary);
   box-shadow: var(--zaix-focus-ring);
 }
 
+/* Checkbox Labels */
 .zaix-checkbox-label {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   font-size: 13px;
   cursor: pointer;
   user-select: none;
+  padding: 3px 0;
 }
 
 .zaix-checkbox-label input[type='checkbox'] {
@@ -194,68 +230,78 @@
   height: 16px;
   accent-color: var(--zaix-primary);
   cursor: pointer;
+  border-radius: 4px;
 }
 
-/* Stats Box */
+/* Stats Metric Chips */
 .zaix-stats-box {
   background: var(--zaix-surface);
   border: 1px solid var(--zaix-border);
-  border-radius: 6px;
-  padding: 10px 12px;
+  border-radius: 10px;
+  padding: 12px;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  gap: 10px;
   text-align: center;
 }
 
 .zaix-stat-val {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--zaix-primary);
 }
 
 .zaix-stat-lbl {
   font-size: 11px;
   color: var(--zaix-muted);
+  font-weight: 500;
+  margin-top: 1px;
 }
 
-/* Status Indicator */
+/* Status Banner */
 .zaix-status {
-  padding: 8px 10px;
-  border-radius: 6px;
-  font-size: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 12.5px;
   background: var(--zaix-surface);
   border-left: 3px solid var(--zaix-primary);
+  display: flex;
+  align-items: center;
 }
 
 .zaix-status.error {
-  border-left-color: #dc2626;
+  border-left-color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
   color: #dc2626;
 }
 
-/* Footer & Action Buttons */
+/* Footer & Buttons */
 .zaix-footer {
-  padding: 12px 18px;
+  padding: 14px 20px;
   border-top: 1px solid var(--zaix-border);
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 10px;
   background: var(--zaix-surface);
 }
 
 .zaix-btn {
-  padding: 8px 14px;
+  padding: 8px 15px;
   font-size: 13px;
-  font-weight: 500;
-  border-radius: 6px;
+  font-weight: 600;
+  border-radius: 8px;
   border: 1px solid var(--zaix-border);
   background: var(--zaix-bg);
   color: var(--zaix-text);
   cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
 }
 
 .zaix-btn:hover {
   background: var(--zaix-surface);
+  border-color: var(--zaix-muted);
 }
 
 .zaix-btn:focus-visible {
@@ -264,23 +310,32 @@
 }
 
 .zaix-btn-primary {
-  background: var(--zaix-primary);
+  background: var(--zaix-primary-gradient);
   color: #ffffff;
-  border-color: var(--zaix-primary);
+  border-color: transparent;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.35);
 }
 
-.zaix-btn-primary:hover {
-  background: var(--zaix-primary-hover);
+.zaix-btn-primary:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.45);
+  transform: translateY(-1px);
+}
+
+.zaix-btn-primary:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .zaix-btn-primary:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .zaix-fab,
+  .zaix-panel,
   .zaix-panel-overlay {
+    animation: none !important;
     transition: none !important;
   }
 }

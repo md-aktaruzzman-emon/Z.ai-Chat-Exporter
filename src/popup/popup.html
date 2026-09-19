@@ -7,33 +7,87 @@
     <link rel="stylesheet" href="./popup.css" />
   </head>
   <body>
-    <div class="popup-container">
+    <div class="popup-wrapper">
+      <!-- Header -->
       <header class="popup-header">
-        <div class="logo-title">
-          <img src="../assets/icons/32.png" alt="Z.ai Exporter" width="24" height="24" />
-          <h1>Z.ai Chat Exporter</h1>
+        <div class="brand">
+          <div class="logo-box">
+            <img src="../assets/icons/32.png" alt="Z.ai Exporter" width="22" height="22" />
+          </div>
+          <div class="brand-info">
+            <h1>Z.ai Exporter</h1>
+            <span class="badge">v2.0.0</span>
+          </div>
         </div>
-        <span class="version-tag">v2.0.0</span>
+        <button
+          type="button"
+          id="btn-open-options"
+          class="icon-btn"
+          title="Open Settings"
+          aria-label="Settings"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+            />
+          </svg>
+        </button>
       </header>
 
-      <div id="page-status-box" class="status-box">Checking active tab...</div>
+      <!-- Status Indicator Box -->
+      <div id="page-status-box" class="status-box">
+        <span class="status-dot"></span>
+        <span class="status-text">Checking active tab...</span>
+      </div>
 
-      <div class="action-buttons">
+      <!-- Main Action -->
+      <div class="primary-action-wrap">
         <button type="button" id="btn-open-panel" class="btn btn-primary" disabled>
-          Open Exporter Panel (Alt+Shift+E)
-        </button>
-        <button type="button" id="btn-open-options" class="btn btn-secondary">
-          Settings & Preferences
+          <svg
+            width="17"
+            height="17"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+            <polyline points="17 21 17 13 7 13 7 21" />
+            <polyline points="7 3 7 8 15 8" />
+          </svg>
+          <span>Open Exporter Panel</span>
+          <kbd class="hotkey">Alt+Shift+E</kbd>
         </button>
       </div>
 
-      <div class="quick-shortcuts">
-        <h3>Quick Export (Current Tab)</h3>
-        <div class="shortcut-grid">
-          <button type="button" class="btn-quick" data-format="pdf" disabled>PDF</button>
-          <button type="button" class="btn-quick" data-format="md" disabled>Markdown</button>
-          <button type="button" class="btn-quick" data-format="docx" disabled>DOCX</button>
-          <button type="button" class="btn-quick" data-format="json" disabled>JSON</button>
+      <!-- Quick Export Section -->
+      <div class="quick-section">
+        <div class="section-title">Quick 1-Click Export</div>
+        <div class="format-tiles">
+          <button type="button" class="btn-quick format-tile" data-format="pdf" disabled>
+            <div class="tile-icon icon-pdf">PDF</div>
+            <span class="tile-label">Document</span>
+          </button>
+          <button type="button" class="btn-quick format-tile" data-format="md" disabled>
+            <div class="tile-icon icon-md">MD</div>
+            <span class="tile-label">Markdown</span>
+          </button>
+          <button type="button" class="btn-quick format-tile" data-format="docx" disabled>
+            <div class="tile-icon icon-docx">DOC</div>
+            <span class="tile-label">Word</span>
+          </button>
+          <button type="button" class="btn-quick format-tile" data-format="json" disabled>
+            <div class="tile-icon icon-json">{ }</div>
+            <span class="tile-label">Raw Data</span>
+          </button>
         </div>
       </div>
     </div>

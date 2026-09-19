@@ -43,6 +43,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   piiCheckbox.checked = settings.anonymizePii;
   historyCheckbox.checked = settings.historyOptin;
 
+  // Interactive token pills to easily insert template variables
+  const tokenPills = document.querySelectorAll('.token-pill');
+  tokenPills.forEach((pill) => {
+    pill.addEventListener('click', () => {
+      const token = pill.getAttribute('data-token');
+      if (!token) return;
+      const start = templateInput.selectionStart || templateInput.value.length;
+      const end = templateInput.selectionEnd || templateInput.value.length;
+      const val = templateInput.value;
+      templateInput.value = val.substring(0, start) + token + val.substring(end);
+      templateInput.focus();
+      templateInput.setSelectionRange(start + token.length, start + token.length);
+    });
+  });
+
   // Check actual runtime contextMenus permission status
   const hasCtxPermission = await chrome.permissions.contains({ permissions: ['contextMenus'] });
   contextMenuCheckbox.checked = hasCtxPermission && settings.contextMenu;
