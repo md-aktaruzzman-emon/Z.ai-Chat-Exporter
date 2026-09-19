@@ -130,7 +130,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
 
           // Lazy load the exporter module
-          const exporterModule = await exporterDef.loader();
+          const exporterModule = await exporterDef.loader(engine);
           const renderFn = exporterModule.exportConversation || exporterModule.default;
           if (typeof renderFn !== 'function') {
             throw new Error(

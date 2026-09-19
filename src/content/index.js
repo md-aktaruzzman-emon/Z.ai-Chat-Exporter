@@ -152,6 +152,14 @@ async function handleExport(options) {
     });
 
     if (response && response.ok) {
+      if (!response.data?.downloadId && response.data?.dataUrl) {
+        await triggerDownload({
+          data: response.data.dataUrl,
+          filename: response.data.filename,
+          mime: response.data.mime
+        });
+      }
+
       panelInstance.setStatus(t('statusComplete'));
       setTimeout(() => {
         panelInstance.element.classList.add('hidden');

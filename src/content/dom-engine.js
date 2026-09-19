@@ -51,13 +51,17 @@ export function deepQueryAll(selector, root = document) {
 
   function traverse(current) {
     if (!current || visited.has(current)) return;
+    if (current.id === 'zaix-extension-root') return;
     visited.add(current);
 
     if (current.querySelectorAll) {
       try {
         const matches = current.querySelectorAll(selector);
         for (let i = 0; i < matches.length; i++) {
-          results.push(matches[i]);
+          const m = matches[i];
+          if (m.id !== 'zaix-extension-root' && !m.closest?.('#zaix-extension-root')) {
+            results.push(m);
+          }
         }
       } catch {
         // ignore malformed selector exceptions on specific subtrees
@@ -68,6 +72,7 @@ export function deepQueryAll(selector, root = document) {
     const children = current.children || [];
     for (let i = 0; i < children.length; i++) {
       const child = children[i];
+      if (child.id === 'zaix-extension-root') continue;
       if (child.shadowRoot) {
         traverse(child.shadowRoot);
       }
@@ -80,34 +85,93 @@ export function deepQueryAll(selector, root = document) {
 }
 
 // Selector Candidates based on Section 11.2
+// Selector Candidates based on Section 11.2 and modern AI SPA interfaces
 export const THREAD_CANDIDATES = [
-  'div[class*="conversation"]',
-  'div[class*="chat-thread"]',
   'main [role="log"]',
-  'div[class*="messages"]',
-  '[class*="chat-container"]',
-  'main'
+  'main [role="feed"]',
+  '[role="log"]',
+  '[role="feed"]',
+  '[data-testid*="conversation" i]',
+  '[data-testid*="chat" i]',
+  '[data-testid*="message-list" i]',
+  'div[class*="conversation" i]',
+  'div[class*="chat-thread" i]',
+  'div[class*="chat-layout" i]',
+  'div[class*="chat-container" i]',
+  'div[class*="chatContainer" i]',
+  'div[class*="chat_container" i]',
+  'div[class*="chat-list" i]',
+  'div[class*="chatList" i]',
+  'div[class*="messages-container" i]',
+  'div[class*="messages" i]',
+  'div[class*="message-list" i]',
+  'div[class*="messageList" i]',
+  'div[class*="scroll-area" i]',
+  'div[class*="scrollArea" i]',
+  'div[class*="chat-box" i]',
+  'div[class*="chatBox" i]',
+  '[class*="chat-container" i]',
+  'div[id="__next"] main',
+  'div[id="root"] main',
+  '#chat-container',
+  'main',
+  '[role="main"]'
 ];
 
 export const MESSAGE_CANDIDATES = [
+  '[data-message-id]',
+  '[data-message-author-role]',
   '[data-role="user"], [data-role="assistant"]',
-  'div[class*="user-message"], div[class*="assistant-message"]',
-  '[class*="message-item"]',
-  '[class*="chat-message"]',
-  '[class*="markdown-body"]'
+  '[data-role="human"], [data-role="bot"]',
+  '[data-author="user"], [data-author="assistant"]',
+  '[data-testid*="message" i]',
+  '[data-testid*="chat-item" i]',
+  '[data-testid*="chat-message" i]',
+  'div[class*="user-message" i], div[class*="assistant-message" i]',
+  'div[class*="bot-message" i], div[class*="ai-message" i]',
+  '[class*="message-item" i]',
+  '[class*="message_item" i]',
+  '[class*="messageItem" i]',
+  '[class*="message-row" i]',
+  '[class*="message_row" i]',
+  '[class*="messageRow" i]',
+  '[class*="chat-message" i]',
+  '[class*="chat_message" i]',
+  '[class*="chatMessage" i]',
+  '[class*="chat-item" i]',
+  '[class*="chat_item" i]',
+  '[class*="chatItem" i]',
+  '[class*="chat-bubble" i]',
+  '[class*="chat_bubble" i]',
+  '[class*="chatBubble" i]',
+  '[class*="message-bubble" i]',
+  '[class*="messageBubble" i]',
+  '[class*="prose" i]',
+  '[class*="markdown-body" i]',
+  '[class*="markdown" i]',
+  'article',
+  '[role="article"]',
+  '[role="listitem"]',
+  '[class*="Message_" i]',
+  '[class*="message_" i]'
 ];
 
 export const TITLE_CANDIDATES = [
-  '[class*="chat-title"]',
+  '[class*="chat-title" i]',
+  '[class*="conversation-title" i]',
+  '[data-testid*="title" i]',
   'header h1',
   'h1',
-  '[class*="conversation-title"]'
+  'header [class*="title" i]',
+  '[aria-selected="true"] [class*="title" i]'
 ];
 
 export const MODEL_CANDIDATES = [
-  '[class*="model-name"]',
-  '[class*="model-badge"]',
-  '[class*="model-selector"]'
+  '[class*="model-name" i]',
+  '[class*="model-badge" i]',
+  '[class*="model-selector" i]',
+  '[data-testid*="model" i]',
+  'button[class*="model" i]'
 ];
 
 let cachedProfile = null;
@@ -121,21 +185,27 @@ let activeSavedProfile = null;
  */
 function scoreThreadCandidate(el) {
   if (!el || typeof el.getBoundingClientRect !== 'function') return -1;
+  if (el.id === 'zaix-extension-root' || el.closest?.('#zaix-extension-root')) return -1;
   const rect = el.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) return -1;
 
   let score = 0;
   // Prefer scrollable elements
   const isScrollable = el.scrollHeight > el.clientHeight;
-  if (isScrollable) score += 20;
+  if (isScrollable) score += 25;
 
   // Count inner message-like nodes
   for (const sel of MESSAGE_CANDIDATES) {
     const matched = el.querySelectorAll(sel);
-    if (matched.length >= 2) {
-      score += matched.length * 5;
+    if (matched.length >= 1) {
+      score += matched.length * 6;
       break;
     }
+  }
+
+  // Bonus if located inside main
+  if (el.closest?.('main') || el.tagName === 'MAIN') {
+    score += 15;
   }
 
   // Penalize the entire document.body / huge window container if a narrower container exists
@@ -243,6 +313,23 @@ export function locate(overrideProfile) {
     }
   }
 
+  if (!bestContainer) {
+    const mainEl = document.querySelector('main, [role="main"], #chat-container');
+    if (mainEl && !mainEl.closest?.('#zaix-extension-root')) {
+      bestContainer = mainEl;
+    } else {
+      const allDivs = Array.from(document.querySelectorAll('div, section, article'));
+      let maxScroll = 0;
+      for (const d of allDivs) {
+        if (d.id === 'zaix-extension-root' || d.closest?.('#zaix-extension-root')) continue;
+        if (d.scrollHeight > maxScroll && d.clientHeight > 150) {
+          maxScroll = d.scrollHeight;
+          bestContainer = d;
+        }
+      }
+    }
+  }
+
   // 2. Find message bubbles (manual override has priority)
   let messageBubbles = [];
   const searchRoot = bestContainer || document.body;
@@ -264,24 +351,81 @@ export function locate(overrideProfile) {
     }
   }
 
-  // Fallback: unwrap wrapper divs and inspect direct children with content
-  if (messageBubbles.length === 0 && bestContainer) {
-    let containerForChildren = bestContainer;
+  // Fallback 1: Scan for prose/markdown blocks and map to top-level turn containers
+  if (messageBubbles.length === 0) {
+    const proseNodes = deepQueryAll(
+      '[class*="prose" i], [class*="markdown" i], pre, p',
+      searchRoot
+    );
+    if (proseNodes.length > 0) {
+      const bubbleSet = new Set();
+      for (const node of proseNodes) {
+        let parent = node;
+        while (
+          parent &&
+          parent.parentElement &&
+          parent.parentElement !== searchRoot &&
+          parent.parentElement !== document.body &&
+          !parent.parentElement.classList.contains('conversation')
+        ) {
+          if (
+            parent.parentElement.children.length >= 2 ||
+            parent.getAttribute('data-role') ||
+            parent.getAttribute('data-message-id') ||
+            (parent.className && /message|chat|item|bubble|turn/i.test(parent.className))
+          ) {
+            break;
+          }
+          parent = parent.parentElement;
+        }
+        if (
+          parent &&
+          parent !== searchRoot &&
+          parent !== document.body &&
+          parent.id !== 'zaix-extension-root' &&
+          !parent.closest?.('#zaix-extension-root')
+        ) {
+          bubbleSet.add(parent);
+        }
+      }
+      if (bubbleSet.size > 0) {
+        messageBubbles = Array.from(bubbleSet);
+      }
+    }
+  }
+
+  // Fallback 2: unwrap wrapper divs and inspect direct children with content
+  if (messageBubbles.length === 0 && searchRoot) {
+    let containerForChildren = searchRoot;
     while (
       containerForChildren &&
       containerForChildren.children.length === 1 &&
-      containerForChildren.firstElementChild
+      containerForChildren.firstElementChild &&
+      containerForChildren.firstElementChild.id !== 'zaix-extension-root'
     ) {
       containerForChildren = containerForChildren.firstElementChild;
     }
     const potentialChildren = Array.from(containerForChildren.children).filter((child) => {
+      if (child.id === 'zaix-extension-root' || child.closest?.('#zaix-extension-root'))
+        return false;
       const text = child.textContent?.trim() || '';
       return (
-        text.length > 0 && (child.clientHeight > 15 || child.scrollHeight > 15 || text.length > 5)
+        text.length > 0 && (child.clientHeight > 10 || child.scrollHeight > 10 || text.length > 3)
       );
     });
     if (potentialChildren.length >= 1) {
       messageBubbles = potentialChildren;
+    }
+  }
+
+  // Fallback 3: Search entire page if searchRoot was too narrow
+  if (messageBubbles.length === 0 && searchRoot !== document.body) {
+    for (const selector of MESSAGE_CANDIDATES) {
+      const found = deepQueryAll(selector, document.body);
+      if (found.length > 0) {
+        messageBubbles = found;
+        break;
+      }
     }
   }
 
@@ -309,7 +453,7 @@ export function locate(overrideProfile) {
   if (!title) {
     for (const sel of TITLE_CANDIDATES) {
       const el = document.querySelector(sel);
-      if (el && el.textContent.trim()) {
+      if (el && el.textContent.trim() && !el.closest?.('#zaix-extension-root')) {
         title = el.textContent.trim();
         break;
       }
@@ -325,7 +469,7 @@ export function locate(overrideProfile) {
   let modelBadge = 'Z.ai';
   for (const sel of MODEL_CANDIDATES) {
     const el = document.querySelector(sel);
-    if (el && el.textContent.trim()) {
+    if (el && el.textContent.trim() && !el.closest?.('#zaix-extension-root')) {
       modelBadge = el.textContent.trim();
       break;
     }
@@ -358,18 +502,19 @@ export function locate(overrideProfile) {
  * @returns {Promise<void>}
  */
 export async function unvirtualize(container) {
-  if (!container) return;
+  if (!container || typeof container.scrollHeight !== 'number') return;
+  if (container.scrollHeight <= container.clientHeight) return;
 
   const originalScrollTop = container.scrollTop;
   let lastScrollHeight = container.scrollHeight;
   let iterations = 0;
-  const MAX_ITERATIONS = 50;
+  const MAX_ITERATIONS = 10;
 
   // Scroll to top progressively to trigger lazy loading / reverse virtualization
   while (iterations < MAX_ITERATIONS) {
     container.scrollTop = 0;
     container.dispatchEvent(new Event('scroll', { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 120));
+    await new Promise((r) => setTimeout(r, 60));
 
     if (container.scrollHeight === lastScrollHeight) {
       break;
@@ -391,41 +536,35 @@ export function isStreaming() {
 
   // 1. Check aria-busy attributes
   const busyElement = document.querySelector('[aria-busy="true"]');
-  if (busyElement) return true;
+  if (busyElement && !busyElement.closest?.('#zaix-extension-root')) return true;
 
   // 2. Stop generation button
   const stopBtn = document.querySelector(
     'button[aria-label*="stop" i], button[title*="stop" i], [class*="stop-generating"]'
   );
-  if (stopBtn && stopBtn.offsetParent !== null) return true;
+  if (stopBtn && stopBtn.offsetParent !== null && !stopBtn.closest?.('#zaix-extension-root'))
+    return true;
 
   return false;
 }
 
 /**
  * Waits for streaming generation to finish or times out safely.
- * @param {number} [timeoutMs=120000]
+ * @param {number} [timeoutMs=10000]
  * @returns {Promise<boolean>} Resolves to true if stream finished, false if timed out
  */
-export async function waitForStreamEnd(timeoutMs = 120000) {
-  const startTime = Date.now();
-  let lastContentLength = document.body ? document.body.innerText.length : 0;
+export async function waitForStreamEnd(timeoutMs = 10000) {
+  if (!isStreaming()) return true;
 
+  const startTime = Date.now();
   while (Date.now() - startTime < timeoutMs) {
     if (!isStreaming()) {
-      // Check content stability across 400ms
-      await new Promise((r) => setTimeout(r, 400));
-      const currentLength = document.body ? document.body.innerText.length : 0;
-      if (currentLength === lastContentLength && !isStreaming()) {
-        return true;
-      }
-      lastContentLength = currentLength;
-    } else {
-      await new Promise((r) => setTimeout(r, 400));
+      return true;
     }
+    await new Promise((r) => setTimeout(r, 300));
   }
 
-  return false; // Timed out
+  return false;
 }
 
 /**

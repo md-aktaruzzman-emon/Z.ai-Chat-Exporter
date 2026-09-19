@@ -13,14 +13,19 @@ import { sanitizeHtml } from '../core/sanitize.js';
  * @param {Element} el
  * @returns {'user'|'assistant'|'system'|'tool'}
  */
-export function classifyRole(el) {
-  // 1. data-role attribute or data-message-author-role
-  const dataRole = el.getAttribute('data-role') || el.getAttribute('data-message-author-role');
+export function classifyRole(el, index = 0) {
+  if (!el) return index % 2 === 0 ? 'user' : 'assistant';
+
+  // 1. data-role attribute or data-message-author-role or data-author
+  const dataRole =
+    el.getAttribute('data-role') ||
+    el.getAttribute('data-message-author-role') ||
+    el.getAttribute('data-author');
   if (dataRole) {
     const r = dataRole.toLowerCase();
-    if (['user', 'human', 'assistant', 'bot', 'system', 'tool'].includes(r)) {
+    if (['user', 'human', 'assistant', 'bot', 'system', 'tool', 'ai'].includes(r)) {
       if (r === 'human') return 'user';
-      if (r === 'bot') return 'assistant';
+      if (r === 'bot' || r === 'ai') return 'assistant';
       return /** @type {'user'|'assistant'|'system'|'tool'} */ (r);
     }
   }
@@ -34,12 +39,52 @@ export function classifyRole(el) {
   // 3. Class name heuristics
   const className = (el.className || '').toString().toLowerCase();
   if (className.includes('user') || className.includes('human')) return 'user';
-  if (className.includes('assistant') || className.includes('bot') || className.includes('ai'))
+  if (
+    className.includes('assistant') ||
+    className.includes('bot') ||
+    className.includes('ai') ||
+    className.includes('agent')
+  )
     return 'assistant';
   if (className.includes('tool')) return 'tool';
   if (className.includes('system')) return 'system';
 
-  // 4. Alignment / layout heuristics (User usually aligned right)
+  // 4. Check author badge, avatar, or name inside bubble
+  const authorBadge = el.querySelector(
+    '[class*="author" i], [class*="name" i], [class*="sender" i], [class*="user" i], [class*="avatar" i], img, svg'
+  );
+  if (authorBadge) {
+    const badgeText = authorBadge.textContent?.trim().toLowerCase() || '';
+    const badgeAlt = (
+      authorBadge.getAttribute?.('alt') ||
+      authorBadge.getAttribute?.('title') ||
+      ''
+    ).toLowerCase();
+    const badgeClass = (authorBadge.className || '').toString().toLowerCase();
+
+    if (
+      badgeText === 'you' ||
+      badgeText === 'user' ||
+      badgeText === 'me' ||
+      badgeAlt.includes('user') ||
+      badgeClass.includes('user')
+    ) {
+      return 'user';
+    }
+    if (
+      badgeText.includes('z.ai') ||
+      badgeText.includes('assistant') ||
+      badgeText.includes('ai') ||
+      badgeAlt.includes('assistant') ||
+      badgeAlt.includes('z.ai') ||
+      badgeAlt.includes('bot') ||
+      badgeClass.includes('assistant')
+    ) {
+      return 'assistant';
+    }
+  }
+
+  // 5. Alignment / layout heuristics (User usually aligned right or flex-end)
   if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
     try {
       const style = window.getComputedStyle(el);
@@ -55,7 +100,8 @@ export function classifyRole(el) {
     }
   }
 
-  return 'assistant';
+  // 6. Natural chat turn alternation fallback
+  return index % 2 === 0 ? 'user' : 'assistant';
 }
 
 /**
@@ -353,7 +399,7 @@ export async function scrapeConversation(options = {}) {
 
   for (let idx = 0; idx < bubbles.length; idx++) {
     const bubble = bubbles[idx];
-    const role = classifyRole(bubble);
+    const role = classifyRole(bubble, idx);
     const rawHtml = bubble.innerHTML;
     const sanitizedHtml = sanitizeHtml(rawHtml);
     const rawText = bubble.textContent?.trim() || '';

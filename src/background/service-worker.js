@@ -230,12 +230,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
           const { dataUrl, filename, mime } = renderResponse.data;
 
-          // Trigger download from service worker
-          const downloadId = await chrome.downloads.download({
-            url: dataUrl,
-            filename: filename || `conversation.${format}`,
-            saveAs: true
-          });
+          let downloadId = null;
+          try {
+            // Trigger download from service worker if supported
+            downloadId = await chrome.downloads.download({
+              url: dataUrl,
+              filename: filename || `conversation.${format}`,
+              saveAs: true
+            });
+          } catch (downloadErr) {
+            console.warn(
+              '[ServiceWorker] chrome.downloads.download threw, delegating to content script DOM download:',
+              downloadErr
+            );
+          }
 
           setActionBadge('success');
 
