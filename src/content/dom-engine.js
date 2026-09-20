@@ -453,28 +453,61 @@ export function locate(overrideProfile) {
     }
   }
 
-  // Fallback 4: Any visible text containers inside main content area
+  // Fallback 4: Structural detection of AI conversation turns (Open WebUI / Svelte / React)
   if (messageBubbles.length === 0) {
-    const mainCandidate = document.querySelector('main, [role="main"], #__next, #root, body');
+    const mainCandidate = document.querySelector('main, [role="main"], #app, #__next, #root, body');
     if (mainCandidate) {
-      const allElements = Array.from(mainCandidate.querySelectorAll('div, section, article, p'));
-      const textBlocks = allElements.filter((el) => {
-        if (el.id === 'zaix-extension-root' || el.closest?.('#zaix-extension-root')) return false;
-        const tag = el.tagName.toLowerCase();
-        if (
-          ['script', 'style', 'nav', 'header', 'footer', 'input', 'textarea', 'button'].includes(
-            tag
-          )
-        )
-          return false;
-        const txt = el.textContent?.trim() || '';
-        return txt.length > 15 && el.children.length <= 2;
-      });
-      if (textBlocks.length > 0) {
-        const uniqueParents = new Set(textBlocks.map((t) => t.parentElement || t));
-        messageBubbles = Array.from(uniqueParents).filter(
-          (p) => !p.closest?.('#zaix-extension-root')
-        );
+      // Look for prose blocks, code blocks, or response actions
+      const contentNodes = Array.from(
+        mainCandidate.querySelectorAll('[class*="prose" i], [class*="markdown" i], pre, .katex-display')
+      ).filter((el) => !el.closest?.('#zaix-extension-root'));
+
+      if (contentNodes.length > 0) {
+        const turnSet = new Set();
+        for (const node of contentNodes) {
+          let cur = node;
+          while (
+            cur &&
+            cur.parentElement &&
+            cur.parentElement !== mainCandidate &&
+            cur.parentElement !== document.body &&
+            cur.parentElement.id !== 'app'
+          ) {
+            if (
+              cur.parentElement.children.length >= 2 &&
+              ((cur.className && /message|turn|chat|bubble|row|item/i.test(cur.className)) ||
+               (cur.parentElement.className && /message-list|messages|thread|conversation/i.test(cur.parentElement.className)))
+            ) {
+              break;
+            }
+            cur = cur.parentElement;
+          }
+          if (cur && cur !== mainCandidate && cur !== document.body && !cur.closest?.('#zaix-extension-root')) {
+            turnSet.add(cur);
+          }
+        }
+        if (turnSet.size > 0) {
+          messageBubbles = Array.from(turnSet);
+        }
+      }
+
+      // If still 0, collect direct children of the deepest container that has multiple children with text
+      if (messageBubbles.length === 0) {
+        const potentialContainers = Array.from(mainCandidate.querySelectorAll('div, section')).filter((c) => {
+          if (c.id === 'zaix-extension-root' || c.closest?.('#zaix-extension-root')) return false;
+          return c.children.length >= 2 && (c.textContent?.trim().length || 0) > 30;
+        });
+        for (const container of potentialContainers) {
+          const directChildrenWithText = Array.from(container.children).filter((ch) => {
+            if (ch.id === 'zaix-extension-root' || ch.closest?.('#zaix-extension-root')) return false;
+            return (ch.textContent?.trim().length || 0) > 10;
+          });
+          if (directChildrenWithText.length >= 2) {
+            messageBubbles = directChildrenWithText;
+            bestContainer = container;
+            break;
+          }
+        }
       }
     }
   }

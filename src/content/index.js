@@ -144,23 +144,35 @@ async function handleExport(options) {
 
     panelInstance.setStatus(t('statusRendering'));
 
-    const response = await chrome.runtime.sendMessage({
-      type: 'EXPORT_REQUEST',
-      format: options.format,
-      engine: options.engine,
-      preset: options.preset,
-      conversation,
-      options
-    });
+    let response = null;
+    try {
+      response = await Promise.race([
+        chrome.runtime.sendMessage({
+          type: 'EXPORT_REQUEST',
+          format: options.format,
+          engine: options.engine,
+          preset: options.preset,
+          conversation,
+          options
+        }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('BACKGROUND_TIMEOUT')), 5000)
+        )
+      ]);
+    } catch (bgErr) {
+      console.warn(
+        '[Z.ai Exporter] Background export unavailable or timed out, executing direct in-page export:',
+        bgErr
+      );
+    }
 
-    if (response && response.ok) {
-      if (!response.data?.downloadId && response.data?.dataUrl) {
-        await triggerDownload({
-          data: response.data.dataUrl,
-          filename: response.data.filename,
-          mime: response.data.mime
-        });
-      }
+    if (response && response.ok && response.data?.dataUrl) {
+      // Background offscreen succeeded
+      await triggerDownload({
+        data: response.data.dataUrl,
+        filename: response.data.filename,
+        mime: response.data.mime
+      });
 
       panelInstance.setStatus(t('statusComplete'));
       setTimeout(() => {
@@ -168,7 +180,29 @@ async function handleExport(options) {
         panelInstance.setStatus('');
       }, 1500);
     } else {
-      panelInstance.setStatus(response?.error?.message || 'Export failed', true, response?.error);
+      // In-page direct rendering fallback (guarantees export succeeds even if SW/offscreen fails)
+      panelInstance.setStatus('Generating file...');
+      const { EXPORTERS } = await import('../exporters/index.js');
+      const exporterDef = EXPORTERS[options.format];
+      if (!exporterDef) {
+        throw new Error(`Unsupported format: ${options.format}`);
+      }
+
+      const exporterModule = await exporterDef.loader(options.engine);
+      const renderFn = exporterModule.exportConversation || exporterModule.default;
+      const renderResult = await renderFn(conversation, options);
+
+      await triggerDownload({
+        data: renderResult.blob || renderResult.dataUrl,
+        filename: renderResult.filename,
+        mime: renderResult.mime || exporterDef.mime
+      });
+
+      panelInstance.setStatus(t('statusComplete'));
+      setTimeout(() => {
+        panelInstance.element.classList.add('hidden');
+        panelInstance.setStatus('');
+      }, 1500);
     }
   } catch (err) {
     console.error('[Z.ai Exporter] Export failed:', err);

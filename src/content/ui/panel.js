@@ -31,19 +31,23 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
 
   overlay.innerHTML = `
     <div class="zaix-panel">
+      <!-- Header -->
       <div class="zaix-header">
-        <div style="display:flex; align-items:center; gap:8px;">
+        <div class="zaix-header-brand">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="var(--zaix-primary)">
+            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/>
+          </svg>
           <h2 class="zaix-title">Z.ai Chat Exporter</h2>
-          <span style="font-size:11px; background:var(--zaix-surface); padding:2px 6px; border-radius:4px; border:1px solid var(--zaix-border); color:var(--zaix-muted);">Ctrl+K</span>
+          <span class="zaix-badge">Ctrl+K</span>
         </div>
-        <div style="display:flex; align-items:center; gap:8px;">
-          <button type="button" id="zaix-panel-theme-toggle" class="zaix-btn" style="padding:4px 8px; font-size:11.5px;" title="Toggle Theme (Light / Dark / Auto)">☀️ Light</button>
+        <div class="zaix-header-actions">
+          <button type="button" id="zaix-panel-theme-toggle" class="zaix-btn-pill" title="Toggle Theme (Light / Dark / Auto)">☀️ Light</button>
           <button type="button" class="zaix-close-btn" aria-label="Close dialog">&times;</button>
         </div>
       </div>
 
       <div class="zaix-body">
-        <!-- Status Notification Live Region -->
+        <!-- Status Notification Banner -->
         <div class="zaix-status" aria-live="polite" style="display:none;"></div>
 
         <!-- Command Palette (Ctrl+K) -->
@@ -52,178 +56,173 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
           <div id="zaix-palette-results" style="margin-top:6px; display:flex; flex-direction:column; gap:4px; max-height:120px; overflow-y:auto; font-size:12px;"></div>
         </div>
 
-        <!-- Live Stats Box -->
-        <div class="zaix-stats-box">
-          <div>
-            <div class="zaix-stat-val" id="zaix-words">0</div>
-            <div class="zaix-stat-lbl">Words</div>
+        <!-- Live Stats Ribbon (Compact row) -->
+        <div class="zaix-stats-ribbon">
+          <div class="zaix-stat-item"><span class="zaix-stat-val" id="zaix-words">0</span><span class="zaix-stat-lbl">words</span></div>
+          <div class="zaix-stat-item"><span class="zaix-stat-val" id="zaix-tokens">0</span><span class="zaix-stat-lbl">tokens</span></div>
+          <div class="zaix-stat-item"><span class="zaix-stat-val" id="zaix-chars">0</span><span class="zaix-stat-lbl">chars</span></div>
+          <div class="zaix-stat-item"><span class="zaix-stat-val" id="zaix-code">0</span><span class="zaix-stat-lbl">code</span></div>
+          <div class="zaix-stat-item"><span class="zaix-stat-val" id="zaix-tables">0</span><span class="zaix-stat-lbl">tables</span></div>
+          <div class="zaix-stat-item"><span class="zaix-stat-val" id="zaix-images">0</span><span class="zaix-stat-lbl">images</span></div>
+        </div>
+
+        <!-- Main Configuration Card -->
+        <div class="zaix-card">
+          <!-- Format & Engine Row -->
+          <div class="zaix-form-row">
+            <div class="zaix-form-group zaix-flex-1">
+              <label class="zaix-label" for="zaix-format-select">Export Format</label>
+              <select id="zaix-format-select" class="zaix-select">
+                <option value="pdf">PDF Document (.pdf)</option>
+                <option value="docx">Word Document (.docx)</option>
+                <option value="md">Markdown (.md)</option>
+                <option value="html">Web Page (.html)</option>
+                <option value="txt">Plain Text (.txt)</option>
+                <option value="json">Raw Data (.json)</option>
+                <option value="png">Screenshot / Image (.png)</option>
+                <option value="csv">Spreadsheet (.csv)</option>
+              </select>
+            </div>
+            <div class="zaix-form-group zaix-flex-1" id="zaix-pdf-engine-group">
+              <label class="zaix-label" for="zaix-pdf-engine-select">PDF Engine</label>
+              <select id="zaix-pdf-engine-select" class="zaix-select">
+                <option value="vector">Vector (Fast & Clean)</option>
+                <option value="raster">Raster (Snapshot)</option>
+              </select>
+            </div>
+            <div class="zaix-form-group zaix-flex-1" id="zaix-md-preset-group" style="display:none;">
+              <label class="zaix-label" for="zaix-md-preset-select">Markdown Preset</label>
+              <select id="zaix-md-preset-select" class="zaix-select">
+                <option value="github">GitHub Flavored (GFM)</option>
+                <option value="obsidian">Obsidian Callouts</option>
+                <option value="notion">Notion Compatible</option>
+              </select>
+            </div>
           </div>
-          <div>
-            <div class="zaix-stat-val" id="zaix-tokens">0</div>
-            <div class="zaix-stat-lbl">Est. Tokens</div>
-          </div>
-          <div>
-            <div class="zaix-stat-val" id="zaix-chars">0</div>
-            <div class="zaix-stat-lbl">Characters</div>
-          </div>
-          <div>
-            <div class="zaix-stat-val" id="zaix-code">0</div>
-            <div class="zaix-stat-lbl">Code Blocks</div>
-          </div>
-          <div>
-            <div class="zaix-stat-val" id="zaix-tables">0</div>
-            <div class="zaix-stat-lbl">Tables</div>
-          </div>
-          <div>
-            <div class="zaix-stat-val" id="zaix-images">0</div>
-            <div class="zaix-stat-lbl">Images</div>
-          </div>
-        </div>
 
-        <!-- Title and Filename Input -->
-        <div class="zaix-form-group">
-          <label class="zaix-label" for="zaix-title-input">Conversation Title</label>
-          <input type="text" id="zaix-title-input" class="zaix-input" value="Z.ai Conversation" />
-        </div>
-
-        <div class="zaix-form-group">
-          <label class="zaix-label" for="zaix-filename-input">Filename Template</label>
-          <input type="text" id="zaix-filename-input" class="zaix-input" value="{{title}}_{{date}}" />
-        </div>
-
-        <!-- Range Selection -->
-        <div class="zaix-form-group">
-          <label class="zaix-label" for="zaix-range-select">Message Range</label>
-          <select id="zaix-range-select" class="zaix-select">
-            <option value="all">All Messages</option>
-            <option value="from_here">From Current View to End</option>
-            <option value="custom">Custom Selection</option>
-          </select>
-        </div>
-
-        <!-- Custom Message Checkbox List Container -->
-        <div id="zaix-custom-messages-container" style="display:none; max-height:140px; overflow-y:auto; border:1px solid var(--zaix-border); border-radius:6px; padding:6px; background:var(--zaix-surface); flex-direction:column; gap:6px;">
-        </div>
-
-        <!-- Export Format -->
-        <div class="zaix-form-group">
-          <label class="zaix-label" for="zaix-format-select">Export Format</label>
-          <select id="zaix-format-select" class="zaix-select">
-            <option value="pdf">PDF (.pdf)</option>
-            <option value="md">Markdown (.md)</option>
-            <option value="docx">Word Document (.docx)</option>
-            <option value="html">Web Page (.html)</option>
-            <option value="txt">Plain Text (.txt)</option>
-            <option value="json">Raw Data (.json)</option>
-            <option value="png">Screenshot / Image (.png)</option>
-            <option value="csv">Spreadsheet (.csv)</option>
-          </select>
-        </div>
-
-        <!-- Format Sub-Options -->
-        <div class="zaix-form-group" id="zaix-pdf-engine-group">
-          <label class="zaix-label" for="zaix-pdf-engine-select">PDF Engine</label>
-          <select id="zaix-pdf-engine-select" class="zaix-select">
-            <option value="vector">Vector / Selectable Text (Fast & Clean)</option>
-            <option value="raster">Raster / Pixel-Perfect DOM Snapshot</option>
-          </select>
-        </div>
-
-        <div class="zaix-form-group" id="zaix-md-preset-group" style="display:none;">
-          <label class="zaix-label" for="zaix-md-preset-select">Markdown Preset</label>
-          <select id="zaix-md-preset-select" class="zaix-select">
-            <option value="github">GitHub Flavored Markdown (GFM)</option>
-            <option value="obsidian">Obsidian (Wikilinks & Callouts)</option>
-            <option value="notion">Notion Compatible</option>
-          </select>
-        </div>
-
-        <!-- Layout & Typography Controls for PDF/HTML/DOCX -->
-        <div id="zaix-layout-controls" style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px;">
+          <!-- Title Input -->
           <div class="zaix-form-group">
-            <label class="zaix-label" for="zaix-page-format-select">Page Format</label>
-            <select id="zaix-page-format-select" class="zaix-select">
-              <option value="a4">A4</option>
-              <option value="letter">Letter</option>
-              <option value="legal">Legal</option>
+            <label class="zaix-label" for="zaix-title-input">Conversation Title</label>
+            <input type="text" id="zaix-title-input" class="zaix-input" value="Z.ai Conversation" />
+          </div>
+
+          <!-- Message Range -->
+          <div class="zaix-form-group">
+            <label class="zaix-label" for="zaix-range-select">Message Range</label>
+            <select id="zaix-range-select" class="zaix-select">
+              <option value="all">All Messages in Thread</option>
+              <option value="from_here">From Current View to End</option>
+              <option value="custom">Custom Selection</option>
             </select>
           </div>
-          <div class="zaix-form-group">
-            <label class="zaix-label" for="zaix-margin-select">Margin</label>
-            <select id="zaix-margin-select" class="zaix-select">
-              <option value="normal">Normal</option>
-              <option value="narrow">Narrow</option>
-              <option value="wide">Wide</option>
-            </select>
-          </div>
-          <div class="zaix-form-group">
-            <label class="zaix-label" for="zaix-font-size-select">Font Size</label>
-            <select id="zaix-font-size-select" class="zaix-select">
-              <option value="9">9 pt</option>
-              <option value="10" selected>10 pt</option>
-              <option value="11">11 pt</option>
-              <option value="12">12 pt</option>
-            </select>
+
+          <!-- Custom Message Checkbox List Container -->
+          <div id="zaix-custom-messages-container" style="display:none; max-height:140px; overflow-y:auto; border:1px solid var(--zaix-border); border-radius:6px; padding:6px; background:var(--zaix-bg); flex-direction:column; gap:6px;">
           </div>
         </div>
 
-        <div class="zaix-form-group">
-          <label class="zaix-label" for="zaix-theme-select">Theme</label>
-          <select id="zaix-theme-select" class="zaix-select">
-            <option value="light" selected>Light</option>
-            <option value="dark">Dark</option>
-            <option value="auto">Auto (Match Z.ai theme)</option>
-          </select>
-        </div>
+        <!-- Collapsible Advanced Document Options -->
+        <details class="zaix-details" id="zaix-advanced-details">
+          <summary class="zaix-summary">
+            <span>⚙️ Document Layout & Advanced Options</span>
+            <span class="zaix-caret">▾</span>
+          </summary>
+          <div class="zaix-details-content">
+            <!-- Filename Template -->
+            <div class="zaix-form-group">
+              <label class="zaix-label" for="zaix-filename-input">Filename Template</label>
+              <input type="text" id="zaix-filename-input" class="zaix-input" value="{{title}}_{{date}}" />
+            </div>
 
-        <!-- Header / Footer Options -->
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px;">
-          <div class="zaix-form-group">
-            <label class="zaix-label" for="zaix-header-text">Header Text</label>
-            <input type="text" id="zaix-header-text" class="zaix-input" placeholder="Optional header" />
+            <!-- Layout & Typography Controls for PDF/HTML/DOCX -->
+            <div id="zaix-layout-controls" class="zaix-grid-3">
+              <div class="zaix-form-group">
+                <label class="zaix-label" for="zaix-page-format-select">Page Format</label>
+                <select id="zaix-page-format-select" class="zaix-select">
+                  <option value="a4">A4</option>
+                  <option value="letter">Letter</option>
+                  <option value="legal">Legal</option>
+                </select>
+              </div>
+              <div class="zaix-form-group">
+                <label class="zaix-label" for="zaix-margin-select">Margin</label>
+                <select id="zaix-margin-select" class="zaix-select">
+                  <option value="normal">Normal</option>
+                  <option value="narrow">Narrow</option>
+                  <option value="wide">Wide</option>
+                </select>
+              </div>
+              <div class="zaix-form-group">
+                <label class="zaix-label" for="zaix-font-size-select">Font Size</label>
+                <select id="zaix-font-size-select" class="zaix-select">
+                  <option value="9">9 pt</option>
+                  <option value="10" selected>10 pt</option>
+                  <option value="11">11 pt</option>
+                  <option value="12">12 pt</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="zaix-form-group">
+              <label class="zaix-label" for="zaix-theme-select">Document Theme</label>
+              <select id="zaix-theme-select" class="zaix-select">
+                <option value="light" selected>Light (Clean & Printable)</option>
+                <option value="dark">Dark</option>
+                <option value="auto">Auto (Match Z.ai theme)</option>
+              </select>
+            </div>
+
+            <!-- Header / Footer Options -->
+            <div class="zaix-grid-2">
+              <div class="zaix-form-group">
+                <label class="zaix-label" for="zaix-header-text">Header Text</label>
+                <input type="text" id="zaix-header-text" class="zaix-input" placeholder="Optional header" />
+              </div>
+              <div class="zaix-form-group">
+                <label class="zaix-label" for="zaix-footer-text">Footer Text</label>
+                <input type="text" id="zaix-footer-text" class="zaix-input" placeholder="Optional footer" />
+              </div>
+            </div>
+
+            <!-- Content Toggles (2-column grid) -->
+            <div class="zaix-checkbox-grid">
+              <label class="zaix-checkbox-label">
+                <input type="checkbox" id="zaix-chk-toc" />
+                <span>Table of Contents</span>
+              </label>
+              <label class="zaix-checkbox-label">
+                <input type="checkbox" id="zaix-chk-thinking" checked />
+                <span>Thinking & Reasoning</span>
+              </label>
+              <label class="zaix-checkbox-label">
+                <input type="checkbox" id="zaix-chk-artifacts" checked />
+                <span>Artifacts / Canvas</span>
+              </label>
+              <label class="zaix-checkbox-label">
+                <input type="checkbox" id="zaix-chk-citations" checked />
+                <span>Citations & Search</span>
+              </label>
+              <label class="zaix-checkbox-label">
+                <input type="checkbox" id="zaix-chk-pii" />
+                <span>Anonymize PII</span>
+              </label>
+              <label class="zaix-checkbox-label">
+                <input type="checkbox" id="zaix-chk-history" checked />
+                <span>Save to History</span>
+              </label>
+            </div>
           </div>
-          <div class="zaix-form-group">
-            <label class="zaix-label" for="zaix-footer-text">Footer Text</label>
-            <input type="text" id="zaix-footer-text" class="zaix-input" placeholder="Optional footer" />
-          </div>
-        </div>
-
-        <!-- Content Toggles -->
-        <label class="zaix-checkbox-label">
-          <input type="checkbox" id="zaix-chk-toc" />
-          <span>Include Table of Contents (TOC)</span>
-        </label>
-
-        <label class="zaix-checkbox-label">
-          <input type="checkbox" id="zaix-chk-thinking" checked />
-          <span>Include Thinking & Reasoning</span>
-        </label>
-
-        <label class="zaix-checkbox-label">
-          <input type="checkbox" id="zaix-chk-artifacts" checked />
-          <span>Include Artifacts / Canvas</span>
-        </label>
-
-        <label class="zaix-checkbox-label">
-          <input type="checkbox" id="zaix-chk-citations" checked />
-          <span>Include Citations & Search Results</span>
-        </label>
-
-        <label class="zaix-checkbox-label">
-          <input type="checkbox" id="zaix-chk-pii" />
-          <span>Anonymize PII (Emails, Keys, Tokens)</span>
-        </label>
-
-        <label class="zaix-checkbox-label">
-          <input type="checkbox" id="zaix-chk-history" checked />
-          <span>Save to Local History</span>
-        </label>
+        </details>
       </div>
 
+      <!-- Footer with Live Status Feedback -->
       <div class="zaix-footer">
-        <button type="button" class="zaix-btn" id="zaix-btn-history">History</button>
-        <button type="button" class="zaix-btn" id="zaix-btn-preview">Preview</button>
-        <button type="button" class="zaix-btn zaix-btn-primary" id="zaix-btn-export">Export Now</button>
+        <div class="zaix-footer-status" id="zaix-footer-status" style="display:none;"></div>
+        <div class="zaix-footer-actions">
+          <button type="button" class="zaix-btn" id="zaix-btn-history">History</button>
+          <button type="button" class="zaix-btn" id="zaix-btn-preview">Preview</button>
+          <button type="button" class="zaix-btn zaix-btn-primary" id="zaix-btn-export">Export Now</button>
+        </div>
       </div>
     </div>
   `;
@@ -231,6 +230,7 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
   // DOM Elements
   const closeBtn = overlay.querySelector('.zaix-close-btn');
   const statusEl = overlay.querySelector('.zaix-status');
+  const footerStatusEl = overlay.querySelector('#zaix-footer-status');
   const titleInput = overlay.querySelector('#zaix-title-input');
   const filenameInput = overlay.querySelector('#zaix-filename-input');
   const formatSelect = overlay.querySelector('#zaix-format-select');
@@ -526,21 +526,37 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
   function setStatus(text, isError = false, diagnostics = null) {
     if (!text) {
       statusEl.style.display = 'none';
+      if (footerStatusEl) footerStatusEl.style.display = 'none';
       return;
     }
     statusEl.innerHTML = '';
+    if (footerStatusEl) footerStatusEl.innerHTML = '';
 
     const textSpan = document.createElement('span');
     textSpan.textContent = text;
     statusEl.appendChild(textSpan);
 
+    if (footerStatusEl) {
+      const footerSpan = document.createElement('span');
+      footerSpan.textContent = text;
+      footerStatusEl.appendChild(footerSpan);
+    }
+
     if (isError) {
       statusEl.classList.add('error');
+      if (footerStatusEl) {
+        footerStatusEl.classList.add('error');
+        footerStatusEl.classList.remove('success');
+      }
+      exportBtn.disabled = false;
+      exportBtn.classList.remove('success');
+      exportBtn.innerHTML = 'Export Now';
+
       // Optional Copy diagnostics button (Section 18 & 32)
       const copyDiagBtn = document.createElement('button');
       copyDiagBtn.type = 'button';
       copyDiagBtn.className = 'zaix-btn';
-      copyDiagBtn.style.cssText = 'margin-left: 10px; padding: 2px 6px; font-size: 11px;';
+      copyDiagBtn.style.cssText = 'margin-left: 8px; padding: 2px 6px; font-size: 11px;';
       copyDiagBtn.textContent = 'Copy diagnostics';
       copyDiagBtn.addEventListener('click', () => {
         const diagInfo = {
@@ -561,10 +577,32 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
         }, 2000);
       });
       statusEl.appendChild(copyDiagBtn);
+      if (footerStatusEl) {
+        footerStatusEl.appendChild(copyDiagBtn.cloneNode(true));
+      }
     } else {
       statusEl.classList.remove('error');
+      if (footerStatusEl) {
+        footerStatusEl.classList.remove('error');
+      }
+      const lower = text.toLowerCase();
+      if (lower.includes('complete') || lower.includes('success') || lower.includes('ready')) {
+        if (footerStatusEl) footerStatusEl.classList.add('success');
+        exportBtn.classList.add('success');
+        exportBtn.innerHTML = '✓ Saved!';
+      } else if (
+        lower.includes('reading') ||
+        lower.includes('formatting') ||
+        lower.includes('generating') ||
+        lower.includes('scraping') ||
+        lower.includes('rendering')
+      ) {
+        exportBtn.disabled = true;
+        exportBtn.innerHTML = '<span class="zaix-spinner"></span> Exporting...';
+      }
     }
     statusEl.style.display = 'block';
+    if (footerStatusEl) footerStatusEl.style.display = 'flex';
   }
 
   function setStreaming(streaming) {
