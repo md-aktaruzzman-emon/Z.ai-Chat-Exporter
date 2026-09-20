@@ -208,13 +208,66 @@ export function parseBlocks(element, options = {}) {
       }
     }
 
-    // 7. Table
+    // 7. Table with structured rows
     if (tag === 'table') {
-      blocks.push({ kind: 'table', html: sanitizeHtml(node.outerHTML) });
+      const trs = Array.from(node.querySelectorAll('tr'));
+      const rows = trs.map((tr) => {
+        return Array.from(tr.querySelectorAll('th, td')).map((cell) => ({
+          text: cell.textContent.trim(),
+          html: sanitizeHtml(cell.innerHTML),
+          isHeader: cell.tagName.toLowerCase() === 'th',
+          colspan: parseInt(cell.getAttribute('colspan') || '1', 10),
+          rowspan: parseInt(cell.getAttribute('rowspan') || '1', 10)
+        }));
+      });
+      blocks.push({
+        kind: 'table',
+        html: sanitizeHtml(node.outerHTML),
+        rows
+      });
       return;
     }
 
-    // 8. Image / Figure
+    // 8. Canvas / Interactive Chart
+    if (tag === 'canvas') {
+      try {
+        const dataUrl = node.toDataURL?.('image/png');
+        if (dataUrl) {
+          blocks.push({
+            kind: 'image',
+            src: dataUrl,
+            dataUrl,
+            alt: node.getAttribute('aria-label') || 'Chart / Canvas Drawing',
+            width: node.width,
+            height: node.height
+          });
+          return;
+        }
+      } catch (err) {
+        console.warn('[Scraper] Canvas capture error:', err);
+      }
+    }
+
+    // 9. SVG / Mermaid Diagram / Visual Chart
+    if (tag === 'svg' || node.matches?.('.mermaid, [class*="diagram"], [class*="chart"]')) {
+      const svgEl = tag === 'svg' ? node : node.querySelector('svg');
+      if (svgEl) {
+        let svgStr = svgEl.outerHTML;
+        if (!svgStr.includes('xmlns=')) {
+          svgStr = svgStr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+        }
+        const dataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(svgStr)}`;
+        blocks.push({
+          kind: 'image',
+          src: dataUrl,
+          dataUrl,
+          alt: svgEl.getAttribute('aria-label') || 'Diagram'
+        });
+        return;
+      }
+    }
+
+    // 10. Image / Figure
     if (tag === 'figure' || tag === 'img') {
       const img = tag === 'img' ? node : node.querySelector('img');
       if (img) {
@@ -228,28 +281,48 @@ export function parseBlocks(element, options = {}) {
       }
     }
 
-    // 9. Headings
+    // 11. Headings
     if (/^h[1-6]$/.test(tag)) {
       const level = parseInt(tag[1], 10);
-      blocks.push({ kind: 'heading', level, text: node.textContent.trim() });
+      blocks.push({ kind: 'heading', level, text: node.textContent.trim(), html: sanitizeHtml(node.innerHTML) });
       return;
     }
 
-    // 10. List (UL, OL)
+    // 12. List (UL, OL) with individual items
     if (tag === 'ul' || tag === 'ol') {
-      blocks.push({ kind: 'list', ordered: tag === 'ol', html: sanitizeHtml(node.outerHTML) });
+      const lis = Array.from(node.querySelectorAll(':scope > li, li'));
+      const items = lis.map((li) => ({
+        text: li.textContent.trim(),
+        html: sanitizeHtml(li.innerHTML)
+      }));
+      blocks.push({
+        kind: 'list',
+        ordered: tag === 'ol',
+        html: sanitizeHtml(node.outerHTML),
+        items: items.length > 0 ? items : [{ text: node.textContent.trim(), html: sanitizeHtml(node.innerHTML) }]
+      });
       return;
     }
 
-    // 11. Quote (BLOCKQUOTE)
+    // 13. Quote (BLOCKQUOTE)
     if (tag === 'blockquote') {
-      blocks.push({ kind: 'quote', html: sanitizeHtml(node.outerHTML) });
+      blocks.push({
+        kind: 'quote',
+        text: node.textContent.trim(),
+        html: sanitizeHtml(node.outerHTML)
+      });
       return;
     }
 
-    // 12. Paragraph
+    // 14. Paragraph
     if (tag === 'p') {
-      // Check for inline math spans inside paragraph
+      const hasImg = node.querySelector('img, svg, canvas');
+      if (hasImg && node.children.length === 1) {
+        processNode(node.firstElementChild);
+        return;
+      }
+
+      // Extract inline math if present
       const mathSpans = node.querySelectorAll('.katex, [data-tex], .math');
       for (const m of mathSpans) {
         let tex = '';
@@ -276,7 +349,12 @@ export function parseBlocks(element, options = {}) {
           }
         }
       }
-      blocks.push({ kind: 'paragraph', html: sanitizeHtml(node.outerHTML) });
+
+      blocks.push({
+        kind: 'paragraph',
+        text: node.textContent.trim(),
+        html: sanitizeHtml(node.outerHTML)
+      });
       return;
     }
 

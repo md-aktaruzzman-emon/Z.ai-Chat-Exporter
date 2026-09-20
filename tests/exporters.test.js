@@ -526,4 +526,88 @@ describe('7. Exporters File Generation', () => {
     el3.setAttribute('data-message-author-role', 'tool');
     expect(classifyRole(el3)).toBe('tool');
   });
+
+  it('preserves structured educational hierarchy (Headings, Lists, Tables, Code) in DOCX export', async () => {
+    const eduConv = createEmptyConversation();
+    eduConv.title = 'Project vs Process Guide';
+    eduConv.messages = [
+      {
+        index: 0,
+        role: 'user',
+        text: 'Q1. Explain Project vs Process with examples',
+        blocks: [
+          { kind: 'heading', level: 1, text: 'Q1. Project vs Process' },
+          { kind: 'paragraph', html: '<p><strong>Question:</strong> What is the core difference between a project and ongoing operations?</p>' }
+        ]
+      },
+      {
+        index: 1,
+        role: 'assistant',
+        text: 'Detailed answer with comparison table and steps',
+        blocks: [
+          { kind: 'heading', level: 2, text: 'Answer & Core Differences' },
+          {
+            kind: 'list',
+            ordered: true,
+            items: [
+              { text: 'A project is temporary with a clear start and end date.' },
+              { text: 'Process work is ongoing and repetitive (e.g. software maintenance).' }
+            ]
+          },
+          {
+            kind: 'table',
+            html: '<table><tr><th>Attribute</th><th>Project</th><th>Process</th></tr><tr><td>Nature</td><td>Unique</td><td>Repetitive</td></tr></table>',
+            rows: [
+              [
+                { text: 'Attribute', isHeader: true },
+                { text: 'Project', isHeader: true },
+                { text: 'Process', isHeader: true }
+              ],
+              [
+                { text: 'Nature' },
+                { text: 'Unique' },
+                { text: 'Repetitive' }
+              ]
+            ]
+          },
+          { kind: 'quote', text: 'Conclusion: Managing projects requires adaptive planning, whereas process work requires standard operating procedures.' }
+        ]
+      }
+    ];
+
+    const res = await docxExporter.exportConversation(eduConv);
+    expect(res.blob.size).toBeGreaterThan(1000);
+    expect(res.filename.endsWith('.docx')).toBe(true);
+
+    const arrayBuffer = await blobToArrayBuffer(res.blob);
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    const docXml = await zip.file('word/document.xml').async('string');
+
+    expect(docXml).toContain('Q1. Project vs Process');
+    expect(docXml).toContain('Question:');
+    expect(docXml).toContain('Answer &amp; Core Differences');
+    expect(docXml).toContain('temporary with a clear start');
+    expect(docXml).toContain('Unique');
+    expect(docXml).toContain('Conclusion:');
+  });
+
+  it('captures SVG and canvas diagrams into image blocks in scraper', () => {
+    const container = document.createElement('div');
+    container.innerHTML = `
+      <div class="user-message">
+        <p>Here is my system architecture diagram:</p>
+        <svg width="200" height="100" aria-label="System Architecture Diagram">
+          <rect x="10" y="10" width="80" height="40" fill="#4F46E5" />
+          <text x="20" y="35" fill="#FFFFFF">App Client</text>
+        </svg>
+      </div>
+    `;
+
+    const blocks = parseBlocks(container.querySelector('.user-message'));
+    expect(blocks.length).toBeGreaterThanOrEqual(2);
+    const imgBlock = blocks.find((b) => b.kind === 'image');
+    expect(imgBlock).toBeDefined();
+    expect(imgBlock.dataUrl).toContain('data:image/svg+xml');
+    expect(imgBlock.alt).toBe('System Architecture Diagram');
+  });
 });

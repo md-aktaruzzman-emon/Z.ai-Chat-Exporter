@@ -14,29 +14,94 @@ import {
   Table,
   TableRow,
   TableCell,
-  WidthType
+  WidthType,
+  BorderStyle
 } from 'docx';
 import { generateFilename } from '../core/utils/filename.js';
 import { anonymizeConversation } from './pii.js';
+
+/**
+ * Parses an HTML string into structured TextRun objects with bold, italics, code, and links preserved.
+ * @param {string} htmlOrText
+ * @returns {TextRun[]}
+ */
+function parseHtmlToTextRuns(htmlOrText) {
+  if (!htmlOrText) return [new TextRun('')];
+
+  if (typeof DOMParser !== 'undefined') {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(`<div>${htmlOrText}</div>`, 'text/html');
+      const root = doc.body.firstElementChild || doc.body;
+      const runs = [];
+
+      function traverse(node, state = { bold: false, italic: false, code: false, link: null }) {
+        if (node.nodeType === 3) {
+          // Text node
+          const text = node.textContent;
+          if (text) {
+            runs.push(
+              new TextRun({
+                text,
+                bold: state.bold,
+                italics: state.italic,
+                font: state.code ? 'Consolas' : undefined,
+                color: state.link ? '2563EB' : undefined,
+                size: state.code ? 19 : 22
+              })
+            );
+          }
+          return;
+        }
+
+        if (node.nodeType === 1) {
+          const tag = node.tagName.toLowerCase();
+          if (tag === 'br') {
+            runs.push(new TextRun({ text: '', break: 1 }));
+            return;
+          }
+          const nextState = { ...state };
+          if (tag === 'strong' || tag === 'b') nextState.bold = true;
+          if (tag === 'em' || tag === 'i') nextState.italic = true;
+          if (tag === 'code') nextState.code = true;
+          if (tag === 'a') nextState.link = node.getAttribute('href');
+
+          for (const child of node.childNodes) {
+            traverse(child, nextState);
+          }
+        }
+      }
+
+      traverse(root);
+      if (runs.length > 0) return runs;
+    } catch {
+      // fallback
+    }
+  }
+
+  const raw = htmlOrText.replace(/<[^>]*>/g, '');
+  return [new TextRun({ text: raw, size: 22 })];
+}
 
 /**
  * Creates DOCX paragraphs and tables from conversation blocks.
  */
 async function createBlocksDocx(msg, modelName) {
   const isUser = msg.role === 'user';
-  const roleName = isUser ? 'User' : modelName || 'Z.ai Assistant';
+  const roleName = isUser ? 'You' : modelName || 'Z.ai Assistant';
   const items = [];
 
   // Speaker heading
   items.push(
     new Paragraph({
       heading: HeadingLevel.HEADING_2,
-      spacing: { before: 200, after: 100 },
+      spacing: { before: 240, after: 120 },
       children: [
         new TextRun({
-          text: `[${roleName}]`,
+          text: roleName,
           bold: true,
-          color: isUser ? '4F46E5' : '059669'
+          color: isUser ? '4F46E5' : '059669',
+          size: 26
         })
       ]
     })
@@ -44,32 +109,121 @@ async function createBlocksDocx(msg, modelName) {
 
   if (Array.isArray(msg.blocks) && msg.blocks.length > 0) {
     for (const block of msg.blocks) {
-      if (block.kind === 'code') {
+      if (block.kind === 'heading') {
+        const hLevel =
+          block.level === 1
+            ? HeadingLevel.HEADING_1
+            : block.level === 2
+              ? HeadingLevel.HEADING_2
+              : block.level === 3
+                ? HeadingLevel.HEADING_3
+                : HeadingLevel.HEADING_4;
+
+        items.push(
+          new Paragraph({
+            heading: hLevel,
+            spacing: { before: 200, after: 100 },
+            children: parseHtmlToTextRuns(block.html || block.text)
+          })
+        );
+      } else if (block.kind === 'list') {
+        const listItems = block.items || [];
+        if (listItems.length > 0) {
+          listItems.forEach((it, idx) => {
+            items.push(
+              new Paragraph({
+                spacing: { before: 40, after: 40 },
+                indent: { left: 360 },
+                children: [
+                  new TextRun({
+                    text: block.ordered ? `${idx + 1}. ` : '• ',
+                    bold: true,
+                    size: 22
+                  }),
+                  ...parseHtmlToTextRuns(it.html || it.text)
+                ]
+              })
+            );
+          });
+        } else {
+          items.push(
+            new Paragraph({
+              spacing: { before: 60, after: 60 },
+              children: parseHtmlToTextRuns(block.html || block.text)
+            })
+          );
+        }
+      } else if (block.kind === 'quote') {
+        items.push(
+          new Paragraph({
+            indent: { left: 720 },
+            spacing: { before: 100, after: 100 },
+            children: [
+              new TextRun({
+                text: block.text || block.html?.replace(/<[^>]*>/g, '') || '',
+                italics: true,
+                color: '4B5563',
+                size: 21
+              })
+            ]
+          })
+        );
+      } else if (block.kind === 'code') {
         const lines = (block.code || '').split('\n');
         const codeRuns = lines.map(
           (line, idx) =>
             new TextRun({
               text: line.length > 0 ? line : ' ',
-              font: 'Courier New',
+              font: 'Consolas',
               size: 19,
+              color: '1E293B',
               break: idx > 0 ? 1 : 0
             })
         );
+
+        const tableBorder = {
+          style: BorderStyle.SINGLE,
+          size: 4,
+          color: 'E2E8F0'
+        };
+
         items.push(
-          new Paragraph({
-            spacing: { before: 100, after: 100 },
-            children: codeRuns
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            borders: {
+              top: tableBorder,
+              bottom: tableBorder,
+              left: { style: BorderStyle.SINGLE, size: 16, color: '6366F1' },
+              right: tableBorder
+            },
+            rows: [
+              new TableRow({
+                children: [
+                  new TableCell({
+                    shading: { fill: 'F8FAFC' },
+                    margins: { top: 120, bottom: 120, left: 180, right: 180 },
+                    children: [
+                      new Paragraph({
+                        spacing: { before: 0, after: 0 },
+                        children: codeRuns
+                      })
+                    ]
+                  })
+                ]
+              })
+            ]
           })
         );
       } else if (block.kind === 'math') {
         items.push(
           new Paragraph({
-            spacing: { before: 80, after: 80 },
+            spacing: { before: 100, after: 100 },
             children: [
               new TextRun({
                 text: `[Formula: ${block.tex}]`,
                 italics: true,
-                color: '4F46E5'
+                color: '4F46E5',
+                size: 22
               })
             ]
           })
@@ -77,12 +231,14 @@ async function createBlocksDocx(msg, modelName) {
       } else if (block.kind === 'thinking') {
         items.push(
           new Paragraph({
+            indent: { left: 360 },
             spacing: { before: 80, after: 80 },
             children: [
               new TextRun({
-                text: `Thinking: ${block.text}`,
+                text: `Thinking Process: ${block.text}`,
                 italics: true,
-                color: '6B7280'
+                color: '64748B',
+                size: 20
               })
             ]
           })
@@ -94,50 +250,76 @@ async function createBlocksDocx(msg, modelName) {
             children: [
               new TextRun({
                 text: `Source: ${block.title} (${block.url})`,
-                color: '2563EB'
+                color: '2563EB',
+                size: 20
               })
             ]
           })
         );
-      } else if (block.kind === 'table' && block.html) {
+      } else if (block.kind === 'table') {
         try {
-          let doc = null;
-          if (typeof DOMParser !== 'undefined') {
+          const rawRows = block.rows;
+          let tableRows = [];
+
+          if (Array.isArray(rawRows) && rawRows.length > 0) {
+            tableRows = rawRows;
+          } else if (block.html && typeof DOMParser !== 'undefined') {
             const parser = new DOMParser();
-            doc = parser.parseFromString(block.html, 'text/html');
-          } else if (typeof document !== 'undefined') {
-            doc = document.implementation.createHTMLDocument('');
-            doc.body.innerHTML = block.html;
-          }
-          if (doc) {
+            const doc = parser.parseFromString(block.html, 'text/html');
             const trElements = Array.from(doc.querySelectorAll('tr'));
-            if (trElements.length > 0) {
-              const rows = trElements.map((tr) => {
-                const cells = Array.from(tr.querySelectorAll('th, td')).map((cell) => {
-                  return new TableCell({
-                    children: [
-                      new Paragraph({
-                        children: [
-                          new TextRun({
-                            text: cell.textContent.trim(),
-                            bold: cell.tagName.toLowerCase() === 'th'
-                          })
-                        ]
-                      })
-                    ]
-                  });
-                });
-                return new TableRow({ children: cells });
-              });
-              items.push(new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE } }));
-            }
+            tableRows = trElements.map((tr) =>
+              Array.from(tr.querySelectorAll('th, td')).map((cell) => ({
+                text: cell.textContent.trim(),
+                html: cell.innerHTML,
+                isHeader: cell.tagName.toLowerCase() === 'th'
+              }))
+            );
           }
-        } catch {
+
+          if (tableRows.length > 0) {
+            const tableBorder = {
+              style: BorderStyle.SINGLE,
+              size: 4,
+              color: 'CBD5E1'
+            };
+
+            const docxRows = tableRows.map((rowCells) => {
+              const cells = rowCells.map((c) => {
+                return new TableCell({
+                  shading: c.isHeader ? { fill: 'F1F5F9' } : undefined,
+                  margins: { top: 100, bottom: 100, left: 140, right: 140 },
+                  children: [
+                    new Paragraph({
+                      children: parseHtmlToTextRuns(c.html || c.text)
+                    })
+                  ]
+                });
+              });
+              return new TableRow({ children: cells });
+            });
+
+            items.push(
+              new Table({
+                width: { size: 100, type: WidthType.PERCENTAGE },
+                borders: {
+                  top: tableBorder,
+                  bottom: tableBorder,
+                  left: tableBorder,
+                  right: tableBorder,
+                  insideHorizontal: tableBorder,
+                  insideVertical: tableBorder
+                },
+                rows: docxRows
+              })
+            );
+          }
+        } catch (tableErr) {
+          console.warn('[DOCX Exporter] Table rendering fallback:', tableErr);
           const raw = block.text || block.html?.replace(/<[^>]*>/g, ' ') || '';
           items.push(
             new Paragraph({
               spacing: { before: 60, after: 60 },
-              children: [new TextRun({ text: raw })]
+              children: [new TextRun({ text: raw, size: 22 })]
             })
           );
         }
@@ -157,7 +339,10 @@ async function createBlocksDocx(msg, modelName) {
               bytes[i] = binaryStr.charCodeAt(i);
             }
             imgData = bytes.buffer;
-          } else if (typeof fetch === 'function' && (imgSrc.startsWith('http') || imgSrc.startsWith('blob:'))) {
+          } else if (
+            typeof fetch === 'function' &&
+            (imgSrc.startsWith('http') || imgSrc.startsWith('blob:'))
+          ) {
             const res = await fetch(imgSrc);
             imgData = await res.arrayBuffer();
           }
@@ -165,7 +350,7 @@ async function createBlocksDocx(msg, modelName) {
           if (imgData) {
             items.push(
               new Paragraph({
-                spacing: { before: 100, after: 100 },
+                spacing: { before: 120, after: 120 },
                 children: [
                   new ImageRun({
                     data: imgData,
@@ -187,45 +372,27 @@ async function createBlocksDocx(msg, modelName) {
                 new TextRun({
                   text: `[Image: ${block.alt || 'Chat Image'}]`,
                   italics: true,
-                  color: '6B7280'
+                  color: '6B7280',
+                  size: 20
                 })
               ]
             })
           );
         }
       } else {
-        const raw = block.text || block.html?.replace(/<[^>]*>/g, '') || '';
-        if (raw.trim()) {
-          const lines = raw.split('\n');
-          const runs = lines.map(
-            (l, idx) =>
-              new TextRun({
-                text: l,
-                break: idx > 0 ? 1 : 0
-              })
-          );
-          items.push(
-            new Paragraph({
-              spacing: { before: 60, after: 60 },
-              children: runs
-            })
-          );
-        }
+        items.push(
+          new Paragraph({
+            spacing: { before: 60, after: 120 },
+            children: parseHtmlToTextRuns(block.html || block.text)
+          })
+        );
       }
     }
-  } else if (msg.text) {
-    const lines = (msg.text || '').split('\n');
-    const runs = lines.map(
-      (l, idx) =>
-        new TextRun({
-          text: l,
-          break: idx > 0 ? 1 : 0
-        })
-    );
+  } else if (msg.html || msg.text) {
     items.push(
       new Paragraph({
-        spacing: { before: 60, after: 60 },
-        children: runs
+        spacing: { before: 60, after: 120 },
+        children: parseHtmlToTextRuns(msg.html || msg.text)
       })
     );
   }
@@ -246,15 +413,16 @@ export async function exportConversation(originalConversation, options = {}) {
   const docChildren = [
     new Paragraph({
       heading: HeadingLevel.TITLE,
-      children: [new TextRun({ text: conv.title, bold: true })]
+      spacing: { before: 100, after: 100 },
+      children: [new TextRun({ text: conv.title, bold: true, size: 36, color: '0F172A' })]
     }),
     new Paragraph({
-      spacing: { after: 200 },
+      spacing: { after: 300 },
       children: [
         new TextRun({
-          text: `Model: ${conv.model} | Exported: ${new Date(conv.createdAt).toLocaleString()}`,
-          color: '6B7280',
-          size: 18
+          text: `Model: ${conv.model}  |  Exported: ${new Date(conv.createdAt).toLocaleString()}`,
+          color: '64748B',
+          size: 19
         })
       ]
     })
@@ -268,7 +436,16 @@ export async function exportConversation(originalConversation, options = {}) {
   const doc = new Document({
     sections: [
       {
-        properties: {},
+        properties: {
+          page: {
+            margin: {
+              top: 1440, // 1 inch
+              bottom: 1440,
+              left: 1440,
+              right: 1440
+            }
+          }
+        },
         children: docChildren
       }
     ]

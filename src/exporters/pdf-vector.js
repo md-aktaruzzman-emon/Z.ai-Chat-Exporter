@@ -80,7 +80,7 @@ function wrapText(text, maxWidth, font, fontSize) {
   let currentLine = '';
 
   for (let word of words) {
-    // If a single word is wider than maxWidth, break it into chunks
+    if (!word) continue;
     while (font.widthOfTextAtSize(word, fontSize) > maxWidth) {
       let sliceLen = Math.max(1, Math.floor(word.length * 0.7));
       while (
@@ -118,7 +118,7 @@ const PAGE_FORMATS = {
 };
 
 const MARGINS = {
-  narrow: 24,
+  narrow: 28,
   wide: 54,
   normal: 40
 };
@@ -150,11 +150,15 @@ export async function exportConversation(originalConversation, options = {}) {
 
   const resolvedTheme = theme === 'auto' || !theme ? conv.theme || 'light' : theme;
   const isDark = resolvedTheme === 'dark';
-  const bgColor = isDark ? rgb(0.12, 0.12, 0.15) : rgb(1, 1, 1);
+  const bgColor = isDark ? rgb(0.1, 0.1, 0.13) : rgb(1, 1, 1);
   const textColor = isDark ? rgb(0.95, 0.95, 0.95) : rgb(0.12, 0.16, 0.22);
   const mutedColor = isDark ? rgb(0.65, 0.65, 0.7) : rgb(0.42, 0.45, 0.5);
-  const primaryColor = rgb(0.31, 0.27, 0.9);
-  const codeBgColor = isDark ? rgb(0.18, 0.18, 0.22) : rgb(0.94, 0.95, 0.96);
+  const primaryColor = isDark ? rgb(0.55, 0.5, 0.95) : rgb(0.31, 0.27, 0.9);
+  const userRoleColor = isDark ? rgb(0.55, 0.5, 0.95) : rgb(0.31, 0.27, 0.9);
+  const assistantRoleColor = isDark ? rgb(0.3, 0.8, 0.6) : rgb(0.05, 0.6, 0.4);
+  const codeBgColor = isDark ? rgb(0.15, 0.15, 0.2) : rgb(0.95, 0.96, 0.98);
+  const tableHeaderBg = isDark ? rgb(0.2, 0.2, 0.25) : rgb(0.93, 0.94, 0.96);
+  const borderColor = isDark ? rgb(0.28, 0.28, 0.35) : rgb(0.85, 0.88, 0.92);
 
   const [pageWidth, pageHeight] = PAGE_FORMATS[pageFormat.toLowerCase()] || PAGE_FORMATS.a4;
   const margin = MARGINS[marginOpt.toLowerCase()] || MARGINS.normal;
@@ -190,37 +194,37 @@ export async function exportConversation(originalConversation, options = {}) {
   }
 
   // Draw Title
-  ensureSpace(40);
+  ensureSpace(45);
   page.drawText(safeWinAnsiText(conv.title || 'Z.ai Conversation', fontBold), {
     x: margin,
-    y: y - 20,
+    y: y - 22,
     size: 18,
     font: fontBold,
     color: textColor
   });
-  y -= 30;
+  y -= 32;
 
   // Metadata Header
   const dateStr = new Date(conv.createdAt).toLocaleString();
-  page.drawText(safeWinAnsiText(`Model: ${conv.model} | Date: ${dateStr}`, fontRegular), {
+  page.drawText(safeWinAnsiText(`Model: ${conv.model}  |  Date: ${dateStr}`, fontRegular), {
     x: margin,
     y: y - 10,
     size: 9,
     font: fontRegular,
     color: mutedColor
   });
-  y -= 25;
+  y -= 22;
 
   // Horizontal divider
   page.drawLine({
     start: { x: margin, y },
     end: { x: pageWidth - margin, y },
     thickness: 1,
-    color: isDark ? rgb(0.25, 0.25, 0.3) : rgb(0.88, 0.9, 0.92)
+    color: borderColor
   });
-  y -= 20;
+  y -= 24;
 
-  // Table of Contents if enabled (Section 16.1)
+  // Table of Contents if enabled
   if (includeToc && Array.isArray(conv.messages) && conv.messages.length > 0) {
     ensureSpace(40);
     page.drawText('Table of Contents', {
@@ -230,7 +234,7 @@ export async function exportConversation(originalConversation, options = {}) {
       font: fontBold,
       color: primaryColor
     });
-    y -= 20;
+    y -= 22;
 
     for (let i = 0; i < Math.min(conv.messages.length, 25); i++) {
       const msg = conv.messages[i];
@@ -245,7 +249,7 @@ export async function exportConversation(originalConversation, options = {}) {
       });
       y -= 14;
     }
-    y -= 15;
+    y -= 16;
   }
 
   // Render Messages
@@ -253,23 +257,115 @@ export async function exportConversation(originalConversation, options = {}) {
     const isUser = msg.role === 'user';
     const roleLabel = isUser ? 'You' : conv.model || 'Z.ai Assistant';
 
-    ensureSpace(30);
+    ensureSpace(32);
 
-    // Speaker Header
+    // Speaker Header with round badge accent
     page.drawText(safeWinAnsiText(roleLabel, fontBold), {
       x: margin,
       y: y - 12,
-      size: fontSize + 1,
+      size: fontSize + 2,
       font: fontBold,
-      color: isUser ? primaryColor : isDark ? rgb(0.4, 0.8, 0.6) : rgb(0.1, 0.6, 0.4)
+      color: isUser ? userRoleColor : assistantRoleColor
     });
     y -= 22;
 
     if (Array.isArray(msg.blocks) && msg.blocks.length > 0) {
       for (const block of msg.blocks) {
-        if (block.kind === 'code') {
+        if (block.kind === 'heading') {
+          const hSize = block.level === 1 ? fontSize + 4 : block.level === 2 ? fontSize + 2.5 : fontSize + 1.5;
+          const hText = block.text || block.html?.replace(/<[^>]*>/g, '') || '';
+          const lines = wrapText(hText, contentWidth, fontBold, hSize);
+
+          ensureSpace(lines.length * (hSize + 4) + 14);
+          y -= 8;
+          for (const l of lines) {
+            page.drawText(l, {
+              x: margin,
+              y: y - hSize,
+              size: hSize,
+              font: fontBold,
+              color: textColor
+            });
+            y -= hSize + 4;
+          }
+          y -= 6;
+        } else if (block.kind === 'list') {
+          const items = block.items || [];
+          if (items.length > 0) {
+            for (let idx = 0; idx < items.length; idx++) {
+              const item = items[idx];
+              const bullet = block.ordered ? `${idx + 1}. ` : '* ';
+              const bulletWidth = fontBold.widthOfTextAtSize(bullet, fontSize);
+              const text = item.text || item.html?.replace(/<[^>]*>/g, '') || '';
+              const lines = wrapText(text, contentWidth - bulletWidth - 8, fontRegular, fontSize);
+
+              ensureSpace(lines.length * (fontSize + 4) + 6);
+              if (lines.length > 0) {
+                page.drawText(safeWinAnsiText(bullet, fontBold), {
+                  x: margin + 8,
+                  y: y - fontSize,
+                  size: fontSize,
+                  font: fontBold,
+                  color: primaryColor
+                });
+
+                for (let li = 0; li < lines.length; li++) {
+                  page.drawText(lines[li], {
+                    x: margin + 8 + bulletWidth + 4,
+                    y: y - fontSize,
+                    size: fontSize,
+                    font: fontRegular,
+                    color: textColor
+                  });
+                  y -= fontSize + 4;
+                }
+              }
+              y -= 3;
+            }
+            y -= 6;
+          } else {
+            const raw = block.text || block.html?.replace(/<[^>]*>/g, '') || '';
+            const lines = wrapText(raw, contentWidth, fontRegular, fontSize);
+            for (const l of lines) {
+              ensureSpace(fontSize + 5);
+              page.drawText(l, {
+                x: margin,
+                y: y - fontSize,
+                size: fontSize,
+                font: fontRegular,
+                color: textColor
+              });
+              y -= fontSize + 4;
+            }
+            y -= 6;
+          }
+        } else if (block.kind === 'quote') {
+          const raw = block.text || block.html?.replace(/<[^>]*>/g, '') || '';
+          const lines = wrapText(raw, contentWidth - 20, fontRegular, fontSize);
+          const blockH = lines.length * (fontSize + 4) + 6;
+
+          ensureSpace(blockH + 8);
+          page.drawLine({
+            start: { x: margin + 4, y: y },
+            end: { x: margin + 4, y: y - blockH },
+            thickness: 2.5,
+            color: primaryColor
+          });
+
+          for (const l of lines) {
+            page.drawText(l, {
+              x: margin + 16,
+              y: y - fontSize,
+              size: fontSize,
+              font: fontRegular,
+              color: mutedColor
+            });
+            y -= fontSize + 4;
+          }
+          y -= 8;
+        } else if (block.kind === 'code') {
           const codeLines = (block.code || '').split('\n');
-          const blockHeight = codeLines.length * 13 + 12;
+          const blockHeight = codeLines.length * 13 + 16;
 
           ensureSpace(Math.min(blockHeight, 200));
 
@@ -288,17 +384,63 @@ export async function exportConversation(originalConversation, options = {}) {
           for (const line of codeLines) {
             ensureSpace(14);
             const safeLine = safeWinAnsiText(line, fontMono);
-            const truncated = safeLine.length > 80 ? safeLine.substring(0, 80) + '...' : safeLine;
+            const truncated = safeLine.length > 85 ? safeLine.substring(0, 85) + '...' : safeLine;
             page.drawText(truncated, {
               x: margin + 8,
-              y: y - 10,
+              y: y - 9,
               size: 8.5,
               font: fontMono,
               color: textColor
             });
             y -= 13;
           }
-          y -= 8;
+          y -= 10;
+        } else if (block.kind === 'table' && Array.isArray(block.rows) && block.rows.length > 0) {
+          const rows = block.rows;
+          const numCols = Math.max(...rows.map((r) => r.length), 1);
+          const colWidth = contentWidth / numCols;
+
+          ensureSpace(30);
+          for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+            const row = rows[rIdx];
+            const isHeader = rIdx === 0 || row.some((c) => c.isHeader);
+            const rowHeight = 22;
+
+            ensureSpace(rowHeight + 4);
+
+            if (isHeader) {
+              page.drawRectangle({
+                x: margin,
+                y: y - rowHeight,
+                width: contentWidth,
+                height: rowHeight,
+                color: tableHeaderBg
+              });
+            }
+
+            page.drawLine({
+              start: { x: margin, y: y - rowHeight },
+              end: { x: margin + contentWidth, y: y - rowHeight },
+              thickness: 0.8,
+              color: borderColor
+            });
+
+            for (let cIdx = 0; cIdx < row.length; cIdx++) {
+              const cell = row[cIdx];
+              const cellText = safeWinAnsiText(cell.text || '', isHeader ? fontBold : fontRegular);
+              const cellX = margin + cIdx * colWidth + 6;
+
+              page.drawText(cellText.substring(0, 35), {
+                x: cellX,
+                y: y - 14,
+                size: fontSize - 1,
+                font: isHeader ? fontBold : fontRegular,
+                color: textColor
+              });
+            }
+            y -= rowHeight;
+          }
+          y -= 10;
         } else if (block.kind === 'math') {
           ensureSpace(20);
           page.drawText(safeWinAnsiText(`[Formula: ${block.tex}]`, fontRegular), {
@@ -322,10 +464,16 @@ export async function exportConversation(originalConversation, options = {}) {
               isPng = true;
               const base64 = imgSrc.split(',')[1];
               imgBytes = Uint8Array.from(atobFn(base64), (c) => c.charCodeAt(0));
-            } else if (imgSrc.startsWith('data:image/jpeg;base64,') || imgSrc.startsWith('data:image/jpg;base64,')) {
+            } else if (
+              imgSrc.startsWith('data:image/jpeg;base64,') ||
+              imgSrc.startsWith('data:image/jpg;base64,')
+            ) {
               const base64 = imgSrc.split(',')[1];
               imgBytes = Uint8Array.from(atobFn(base64), (c) => c.charCodeAt(0));
-            } else if (typeof fetch === 'function' && (imgSrc.startsWith('http') || imgSrc.startsWith('blob:'))) {
+            } else if (
+              typeof fetch === 'function' &&
+              (imgSrc.startsWith('http') || imgSrc.startsWith('blob:'))
+            ) {
               const res = await fetch(imgSrc);
               const buffer = await res.arrayBuffer();
               imgBytes = new Uint8Array(buffer);
@@ -347,8 +495,8 @@ export async function exportConversation(originalConversation, options = {}) {
                 const imgDims = embeddedImg.scale(1);
                 let displayWidth = Math.min(imgDims.width, contentWidth);
                 let displayHeight = (imgDims.height / imgDims.width) * displayWidth;
-                if (displayHeight > 400) {
-                  displayHeight = 400;
+                if (displayHeight > 380) {
+                  displayHeight = 380;
                   displayWidth = (imgDims.width / imgDims.height) * displayHeight;
                 }
 
@@ -377,41 +525,47 @@ export async function exportConversation(originalConversation, options = {}) {
         } else {
           // Paragraph / Text / Other
           const raw = block.text || block.html?.replace(/<[^>]*>/g, '') || '';
-          const lines = wrapText(raw, contentWidth, fontRegular, fontSize);
-          for (const l of lines) {
-            ensureSpace(15);
-            page.drawText(l, {
-              x: margin,
-              y: y - 11,
-              size: fontSize,
-              font: fontRegular,
-              color: textColor
-            });
-            y -= 15;
+          if (raw.trim()) {
+            const lines = wrapText(raw, contentWidth, fontRegular, fontSize);
+            for (const l of lines) {
+              ensureSpace(fontSize + 5);
+              page.drawText(l, {
+                x: margin,
+                y: y - fontSize,
+                size: fontSize,
+                font: fontRegular,
+                color: textColor
+              });
+              y -= fontSize + 4.5;
+            }
+            y -= 7; // Clean paragraph bottom margin
           }
         }
       }
     } else {
       // Fallback message text
       const raw = msg.text || '';
-      const lines = wrapText(raw, contentWidth, fontRegular, fontSize);
-      for (const l of lines) {
-        ensureSpace(15);
-        page.drawText(l, {
-          x: margin,
-          y: y - 11,
-          size: fontSize,
-          font: fontRegular,
-          color: textColor
-        });
-        y -= 15;
+      if (raw.trim()) {
+        const lines = wrapText(raw, contentWidth, fontRegular, fontSize);
+        for (const l of lines) {
+          ensureSpace(fontSize + 5);
+          page.drawText(l, {
+            x: margin,
+            y: y - fontSize,
+            size: fontSize,
+            font: fontRegular,
+            color: textColor
+          });
+          y -= fontSize + 4.5;
+        }
+        y -= 7;
       }
     }
 
-    y -= 15; // Gap between messages
+    y -= 14; // Gap between speaker messages
   }
 
-  // Draw headers, footers, and page numbers across all pages (Section 16.1)
+  // Draw headers, footers, and page numbers across all pages
   const totalPages = pdfDoc.getPageCount();
   for (let i = 0; i < totalPages; i++) {
     const p = pdfDoc.getPage(i);

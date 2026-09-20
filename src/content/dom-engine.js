@@ -502,17 +502,47 @@ export function locate(overrideProfile) {
   }
   if (!title) {
     for (const sel of TITLE_CANDIDATES) {
-      const el = document.querySelector(sel);
-      if (el && el.textContent.trim() && !el.closest?.('#zaix-extension-root')) {
-        title = el.textContent.trim();
-        break;
+      const candidates = Array.from(document.querySelectorAll(sel));
+      for (const el of candidates) {
+        if (
+          el &&
+          el.textContent.trim() &&
+          !el.closest?.('#zaix-extension-root') &&
+          !el.closest?.('#messages-container') &&
+          !el.closest?.('.user-message') &&
+          !el.closest?.('.chat-assistant') &&
+          !el.closest?.('.chat-user') &&
+          !el.closest?.('[id^="message-"]')
+        ) {
+          const candidateText = el.textContent.trim();
+          if (candidateText.length > 0 && candidateText.length < 120) {
+            title = candidateText;
+            break;
+          }
+        }
       }
+      if (title) break;
+    }
+  }
+  if (!title && document.title) {
+    const cleanDocTitle = document.title
+      .replace(/[-|]\s*Z\.ai.*$/i, '')
+      .replace(/^Z\.ai\s*[-|:]\s*/i, '')
+      .trim();
+    if (cleanDocTitle && !/^z\.ai$/i.test(cleanDocTitle) && !cleanDocTitle.toLowerCase().includes('z.ai - advanced')) {
+      title = cleanDocTitle;
+    }
+  }
+  if (!title && messageBubbles.length > 0) {
+    const firstBubble = messageBubbles[0];
+    const text = firstBubble?.textContent?.trim() || '';
+    if (text) {
+      title = text.substring(0, 45).replace(/\n/g, ' ').trim();
+      if (text.length > 45) title += '...';
     }
   }
   if (!title) {
-    title = document.title
-      ? document.title.replace(/[-|]\s*Z\.ai.*$/i, '').trim()
-      : 'Z.ai Conversation';
+    title = 'Z.ai Conversation';
   }
 
   // Detect Model Badge
