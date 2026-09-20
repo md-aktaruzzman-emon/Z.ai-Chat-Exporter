@@ -370,6 +370,9 @@ export function parseBlocks(element, options = {}) {
           'ol',
           'blockquote',
           'figure',
+          'svg',
+          'canvas',
+          'img',
           'h1',
           'h2',
           'h3',
@@ -379,7 +382,7 @@ export function parseBlocks(element, options = {}) {
           'details'
         ].includes(cTag) ||
         child.matches?.(
-          '[class*="think"], [class*="artifact"], [class*="tool-call"], .search-results-block, .katex-display'
+          'svg, canvas, img, .mermaid, [class*="diagram"], [class*="chart"], [class*="think"], [class*="artifact"], [class*="tool-call"], .search-results-block, .katex-display'
         )
       );
     });

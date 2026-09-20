@@ -99,7 +99,7 @@ export async function exportConversation(originalConversation, options = {}) {
   const { anonymizePii = false, theme = 'auto', pageFormat = 'a4' } = options;
   const conv = anonymizePii ? anonymizeConversation(originalConversation) : originalConversation;
 
-  const resolvedTheme = theme === 'auto' || !theme ? conv.theme || 'light' : theme;
+  const resolvedTheme = theme === 'dark' ? 'dark' : 'light';
   const html = buildRenderHtml(conv, resolvedTheme);
   const container = document.createElement('div');
   container.innerHTML = html;

@@ -96,10 +96,12 @@ async function openPanel() {
   if (!panelInstance) return;
   panelInstance.element.classList.remove('hidden');
 
-  // Synchronize auto theme with current host theme
+  // Synchronize theme with current selection
   const currentOptions = panelInstance.getOptions();
   if (currentOptions.theme === 'auto') {
     shadowRootHost.setAttribute('data-theme', detectTheme());
+  } else {
+    shadowRootHost.setAttribute('data-theme', currentOptions.theme || 'light');
   }
 
   try {

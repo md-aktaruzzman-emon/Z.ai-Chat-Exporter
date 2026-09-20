@@ -19,6 +19,7 @@ import {
 } from 'docx';
 import { generateFilename } from '../core/utils/filename.js';
 import { anonymizeConversation } from './pii.js';
+import { imageSourceToPngBytes } from '../core/utils/image.js';
 
 /**
  * Parses an HTML string into structured TextRun objects with bold, italics, code, and links preserved.
@@ -326,34 +327,15 @@ async function createBlocksDocx(msg, modelName) {
       } else if (block.kind === 'image' && (block.src || block.dataUrl)) {
         try {
           const imgSrc = block.dataUrl || block.src;
-          let imgData = null;
+          const convResult = await imageSourceToPngBytes(imgSrc);
 
-          if (imgSrc.startsWith('data:image/')) {
-            const base64 = imgSrc.split(',')[1];
-            const atobFn = globalThis.atob
-              ? (s) => globalThis.atob(s)
-              : (s) => globalThis.Buffer.from(s, 'base64').toString('binary');
-            const binaryStr = atobFn(base64);
-            const bytes = new Uint8Array(binaryStr.length);
-            for (let i = 0; i < binaryStr.length; i++) {
-              bytes[i] = binaryStr.charCodeAt(i);
-            }
-            imgData = bytes.buffer;
-          } else if (
-            typeof fetch === 'function' &&
-            (imgSrc.startsWith('http') || imgSrc.startsWith('blob:'))
-          ) {
-            const res = await fetch(imgSrc);
-            imgData = await res.arrayBuffer();
-          }
-
-          if (imgData) {
+          if (convResult && convResult.bytes) {
             items.push(
               new Paragraph({
                 spacing: { before: 120, after: 120 },
                 children: [
                   new ImageRun({
-                    data: imgData,
+                    data: convResult.bytes.buffer,
                     transformation: {
                       width: 450,
                       height: 300

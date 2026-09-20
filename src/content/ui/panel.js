@@ -37,7 +37,7 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
           <span style="font-size:11px; background:var(--zaix-surface); padding:2px 6px; border-radius:4px; border:1px solid var(--zaix-border); color:var(--zaix-muted);">Ctrl+K</span>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
-          <button type="button" id="zaix-panel-theme-toggle" class="zaix-btn" style="padding:4px 8px; font-size:11.5px;" title="Toggle Theme (Auto / Light / Dark)">☀️ Auto</button>
+          <button type="button" id="zaix-panel-theme-toggle" class="zaix-btn" style="padding:4px 8px; font-size:11.5px;" title="Toggle Theme (Light / Dark / Auto)">☀️ Light</button>
           <button type="button" class="zaix-close-btn" aria-label="Close dialog">&times;</button>
         </div>
       </div>
@@ -170,9 +170,9 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
         <div class="zaix-form-group">
           <label class="zaix-label" for="zaix-theme-select">Theme</label>
           <select id="zaix-theme-select" class="zaix-select">
-            <option value="auto">Auto (Match Z.ai theme)</option>
-            <option value="light">Light</option>
+            <option value="light" selected>Light</option>
             <option value="dark">Dark</option>
+            <option value="auto">Auto (Match Z.ai theme)</option>
           </select>
         </div>
 
@@ -245,7 +245,7 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
   const themeSelect = overlay.querySelector('#zaix-theme-select');
   const themeToggleBtn = overlay.querySelector('#zaix-panel-theme-toggle');
 
-  let currentTheme = 'auto';
+  let currentTheme = 'light';
 
   function updateThemeDisplay(theme) {
     currentTheme = theme;
@@ -267,7 +267,7 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
   if (themeToggleBtn) {
     themeToggleBtn.addEventListener('click', () => {
       const nextTheme =
-        currentTheme === 'auto' ? 'dark' : currentTheme === 'dark' ? 'light' : 'auto';
+        currentTheme === 'light' ? 'dark' : currentTheme === 'dark' ? 'auto' : 'light';
       updateThemeDisplay(nextTheme);
       if (typeof onThemeChange === 'function') {
         onThemeChange(nextTheme);

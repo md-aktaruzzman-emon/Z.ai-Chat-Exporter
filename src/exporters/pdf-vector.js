@@ -7,24 +7,103 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { generateFilename } from '../core/utils/filename.js';
 import { anonymizeConversation } from './pii.js';
+import { imageSourceToPngBytes } from '../core/utils/image.js';
 
-// Common math/arrow symbols transliteration for WinAnsi StandardFonts
+// Comprehensive symbol & diagram transliterations for WinAnsi StandardFonts
 const SYMBOL_REPLACEMENTS = {
+  // Tree & Directory structure characters (prevents ??? in project diagrams)
+  '├──': '|-- ',
+  '└──': '`-- ',
+  '│': '|',
+  '├': '|-',
+  '└': '`- ',
+  '─': '-',
+  '━': '=',
+  '┃': '|',
+  '┌': '+',
+  '┐': '+',
+  '┘': '+',
+  '┬': '+',
+  '┴': '+',
+  '┼': '+',
+  '═': '=',
+  '║': '|',
+  '╔': '+',
+  '╗': '+',
+  '╝': '+',
+  '╚': '+',
+  '╠': '+',
+  '╣': '+',
+  '╦': '+',
+  '╩': '+',
+  '╬': '+',
+
+  // Flowchart & Diagram Arrows
+  '↓': 'v',
+  '↑': '^',
   '→': '->',
   '←': '<-',
   '↔': '<->',
+  '↕': '|^|',
   '⇒': '=>',
   '⇐': '<=',
+  '⇔': '<=>',
+  '➔': '->',
+  '➜': '->',
+  '➤': '->',
+  '►': '>',
+  '◄': '<',
+  '▲': '^',
+  '▼': 'v',
+  '▶': '>',
+  '◀': '<',
+
+  // Checklists, markers, and bullets
+  '✓': '[v]',
+  '✔': '[v]',
+  '✕': '[x]',
+  '✖': '[x]',
+  '✗': '[x]',
+  '•': '*',
+  '●': '*',
+  '○': 'o',
+  '■': '*',
+  '□': '[ ]',
+  '▪': '*',
+  '▫': '*',
+  '◆': '*',
+  '◇': '*',
+  '★': '*',
+  '☆': '*',
+
+  // Typography, Quotes & Dashes
+  '—': '--',
+  '–': '-',
+  '…': '...',
+  '“': '"',
+  '”': '"',
+  '‘': "'",
+  '’': "'",
+  '«': '<<',
+  '»': '>>',
+
+  // Math, currency, and scientific symbols
+  '≈': '~',
+  '≠': '!=',
   '≤': '<=',
   '≥': '>=',
-  '≠': '!=',
-  '≈': '~',
   '±': '+/-',
-  '×': 'x',
+  '×': '*',
   '÷': '/',
-  '•': '*',
-  '–': '-',
-  '—': '--'
+  '∞': 'inf',
+  '∑': 'sum',
+  '∏': 'prod',
+  '√': 'sqrt',
+  '€': 'EUR',
+  '£': 'GBP',
+  '¥': 'JPY',
+  '₹': 'INR',
+  '৳': 'BDT'
 };
 
 const fontSupportCache = new WeakMap();
@@ -63,7 +142,7 @@ export function safeWinAnsiText(str, font) {
       }
       charCache.set(char, supported);
     }
-    result += supported ? char : char.charCodeAt(0) > 127 ? '?' : ' ';
+    result += supported ? char : char.charCodeAt(0) > 127 ? ' ' : ' ';
   }
   return result;
 }
@@ -148,7 +227,7 @@ export async function exportConversation(originalConversation, options = {}) {
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const fontMono = await pdfDoc.embedFont(StandardFonts.Courier);
 
-  const resolvedTheme = theme === 'auto' || !theme ? conv.theme || 'light' : theme;
+  const resolvedTheme = theme === 'dark' ? 'dark' : 'light';
   const isDark = resolvedTheme === 'dark';
   const bgColor = isDark ? rgb(0.1, 0.1, 0.13) : rgb(1, 1, 1);
   const textColor = isDark ? rgb(0.95, 0.95, 0.95) : rgb(0.12, 0.16, 0.22);
@@ -454,41 +533,14 @@ export async function exportConversation(originalConversation, options = {}) {
         } else if (block.kind === 'image' && (block.src || block.dataUrl)) {
           try {
             const imgSrc = block.dataUrl || block.src;
-            let imgBytes = null;
-            let isPng = false;
+            const convResult = await imageSourceToPngBytes(imgSrc);
 
-            const atobFn = globalThis.atob
-              ? (s) => globalThis.atob(s)
-              : (s) => globalThis.Buffer.from(s, 'base64').toString('binary');
-            if (imgSrc.startsWith('data:image/png;base64,')) {
-              isPng = true;
-              const base64 = imgSrc.split(',')[1];
-              imgBytes = Uint8Array.from(atobFn(base64), (c) => c.charCodeAt(0));
-            } else if (
-              imgSrc.startsWith('data:image/jpeg;base64,') ||
-              imgSrc.startsWith('data:image/jpg;base64,')
-            ) {
-              const base64 = imgSrc.split(',')[1];
-              imgBytes = Uint8Array.from(atobFn(base64), (c) => c.charCodeAt(0));
-            } else if (
-              typeof fetch === 'function' &&
-              (imgSrc.startsWith('http') || imgSrc.startsWith('blob:'))
-            ) {
-              const res = await fetch(imgSrc);
-              const buffer = await res.arrayBuffer();
-              imgBytes = new Uint8Array(buffer);
-              const contentType = res.headers.get('content-type') || '';
-              if (contentType.includes('png') || imgSrc.toLowerCase().endsWith('.png')) {
-                isPng = true;
-              }
-            }
-
-            if (imgBytes) {
+            if (convResult && convResult.bytes) {
               let embeddedImg = null;
-              if (isPng) {
-                embeddedImg = await pdfDoc.embedPng(imgBytes);
+              if (convResult.isPng) {
+                embeddedImg = await pdfDoc.embedPng(convResult.bytes);
               } else {
-                embeddedImg = await pdfDoc.embedJpg(imgBytes);
+                embeddedImg = await pdfDoc.embedJpg(convResult.bytes);
               }
 
               if (embeddedImg) {
