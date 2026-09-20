@@ -187,6 +187,16 @@ async function handleExport(options) {
         new Promise((_, reject) => setTimeout(() => reject(new Error('BACKGROUND_TIMEOUT')), 30000))
       ]);
     } catch (bgErr) {
+      // Extension was reloaded while this page was open — the old content script
+      // can no longer communicate with the new service worker. Tell the user to refresh.
+      if (bgErr?.message?.includes('Extension context invalidated')) {
+        panelInstance.setStatus(
+          '⚠️ Extension was updated. Please refresh this page, then try again.',
+          true
+        );
+        isExporting = false;
+        return;
+      }
       console.warn(
         '[Z.ai Exporter] Background export unavailable or timed out, executing direct in-page export:',
         bgErr
@@ -236,6 +246,13 @@ async function handleExport(options) {
       }, 1500);
     }
   } catch (err) {
+    if (err?.message?.includes('Extension context invalidated')) {
+      panelInstance.setStatus(
+        '⚠️ Extension was updated. Please refresh this page to continue exporting.',
+        true
+      );
+      return;
+    }
     console.error('[Z.ai Exporter] Export failed:', err);
     panelInstance.setStatus(err.message || 'Export error', true, {
       code: err.code || 'EXPORT_ERROR',
@@ -283,6 +300,13 @@ async function handlePreview(options) {
       panelInstance.setStatus(response?.error?.message || 'Preview generation failed', true);
     }
   } catch (err) {
+    if (err?.message?.includes('Extension context invalidated')) {
+      panelInstance.setStatus(
+        '⚠️ Extension was updated. Please refresh this page, then try again.',
+        true
+      );
+      return;
+    }
     panelInstance.setStatus(err.message || 'Preview error', true);
   } finally {
     isPreviewing = false;
