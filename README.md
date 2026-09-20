@@ -9,6 +9,7 @@
   <img src="https://img.shields.io/badge/privacy-100%25%20local-green?style=flat-square" alt="Local Only" />
   <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" alt="License" />
   <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build" />
+  <img src="https://img.shields.io/badge/tests-43%20passed-brightgreen?style=flat-square" alt="Tests" />
 </p>
 
 <h3 align="center">Export your Z.ai conversations to PDF, DOCX, Markdown, HTML, and more — all locally, with zero data leaving your browser.</h3>
@@ -22,7 +23,9 @@
 - [🏗️ Architecture](#️-architecture)
 - [⚙️ Installation](#️-installation)
 - [🧪 Development](#-development)
+- [🛠️ Troubleshooting](#️-troubleshooting)
 - [⚠️ Known Limitations](#️-known-limitations)
+- [📅 Changelog](#-changelog)
 - [🤝 Contributing](#-contributing)
 
 ---
@@ -32,15 +35,17 @@
 | Feature | Description |
 |---|---|
 | 🔒 **100% Local & Private** | All rendering, parsing, and conversion runs entirely inside your browser. Zero telemetry, zero analytics, zero CDN calls. |
-| 📄 **Vector PDF** | Selectable, searchable PDF via `pdf-lib`. Text is real text — not images. |
+| 📄 **Vector PDF** | Selectable, searchable PDF via `pdf-lib`. Text is real text — not images. Full multiline code blocks, dynamic table rows, repeated headers at page breaks. |
 | 🖼️ **Raster PDF** | Full visual-fidelity PDF screenshot via `html2canvas + jsPDF`. Preserves charts, diagrams, colours. |
-| 📝 **Word / DOCX** | Structured DOCX with proper headings, tables, code blocks, and embedded images via `docx.js`. |
+| 📝 **Word / DOCX** | Structured DOCX with proper headings, tables, code blocks, native Word math (OMML), and embedded images. |
 | ⬇️ **Markdown (3 presets)** | GitHub-flavored (GFM), Obsidian callouts/wikilinks, and Notion paste-safe Markdown. |
-| 🌐 **HTML Export** | Standalone self-contained HTML file with all styles inlined. |
+| 🌐 **HTML Export** | Standalone self-contained HTML file with all styles and KaTeX math inlined. |
+| 📐 **Math / LaTeX** | KaTeX rendered offline — vector SVG equations in PDF, native OMML in Word, inline HTML for HTML/Markdown. |
 | 📊 **Graphs & Diagrams** | SVG and canvas-rendered charts (Mermaid, Chart.js, etc.) are rasterized and embedded in PDF/DOCX. |
 | 🧹 **PII Anonymizer** | Locally redacts emails, phone numbers, API keys, bearer tokens, and JWT credentials before export. |
 | 🗂️ **Export History** | Optional local IndexedDB history cache with 200-entry LRU eviction — re-download past exports anytime. |
 | 🌍 **Multi-Language** | Fully localized in English (`en`) and Bengali (`bn`). |
+| ⚡ **Smart Error Recovery** | If the extension is reloaded mid-session, a clear banner guides you to refresh rather than showing a cryptic error. |
 
 ---
 
@@ -50,11 +55,11 @@
 
 | Format | Engine | Highlights |
 |:---:|:---:|---|
-| **PDF (Vector)** | `pdf-lib` | Selectable text, smallest file size |
+| **PDF (Vector)** | `pdf-lib` | Selectable text, smallest file size, math as SVG equations |
 | **PDF (Raster)** | `html2canvas` + `jsPDF` | Pixel-perfect, preserves all visuals |
-| **DOCX** | `docx.js` | Editable Word document with full structure |
+| **DOCX** | `docx.js` | Editable Word document with native OMML math |
 | **Markdown** | Built-in | GFM / Obsidian / Notion presets |
-| **HTML** | Built-in | Self-contained, styles inlined |
+| **HTML** | Built-in | Self-contained, styles + KaTeX inlined |
 | **TXT** | Built-in | Plain text, no formatting |
 | **JSON** | Built-in | Raw conversation data structure |
 | **PNG** | `html2canvas` | Full-page image, auto-split for large chats |
@@ -136,7 +141,7 @@ npm install
 # Start dev server (hot reload)
 npm run dev
 
-# Run all unit & integration tests
+# Run all unit & integration tests  (43 tests)
 npm test
 
 # Lint source code
@@ -164,12 +169,48 @@ Z.ai-Chat-Exporter/
 │   │   └── scraper.js    # Conversation scraper & block parser
 │   ├── exporters/        # PDF, DOCX, MD, HTML, JSON, CSV renderers
 │   ├── offscreen/        # Hidden render document
-│   └── core/             # Shared utilities (i18n, download, image)
+│   └── core/             # Shared utilities (i18n, math, tables, image)
+│       ├── math-renderer.js  # Offline KaTeX → SVG / MathML / OMML
+│       ├── table-layout.js   # Column width distribution & cell wrapping
+│       └── katex-css.js      # Bundled KaTeX CSS (offline, no CDN)
 ├── assets/               # Static assets (banner, icons)
 ├── dist/                 # Built extension (load this in Chrome)
 ├── tests/                # Vitest test suite
+│   ├── exporters.test.js
+│   └── rich-exporters.test.js
 └── manifest.json         # Chrome Extension MV3 manifest
 ```
+
+---
+
+## 🛠️ Troubleshooting
+
+### ❓ Clicking "Export Now" does nothing
+
+**Cause:** The extension was reloaded (via `chrome://extensions → Update`) but the old content script is still running on the chat page.
+
+**Fix:**
+1. After reloading the extension, go back to the `chat.z.ai` tab
+2. Press **F5** (or Ctrl+R) to refresh the page
+3. Click the extension button again — it will work ✅
+
+> The panel now shows a clear warning banner: **"⚠️ Extension was updated. Please refresh this page, then try again."** if this happens.
+
+---
+
+### ❓ File doesn't download after export
+
+**Cause:** `chrome.downloads` is not available in content scripts.
+
+**Fix (already applied):** The exporter uses a DOM anchor click (`<a download>`) to trigger downloads safely from the content script context. No additional action needed — just make sure the page is not in a sandboxed iframe.
+
+---
+
+### ❓ Math / LaTeX shows as `[Formula: ...]`
+
+**Cause:** Older export (pre v2.0). Math rendering now uses offline KaTeX — no CDN required.
+
+**Fix:** Rebuild the extension (`npm run build`) and reload the `dist/` folder.
 
 ---
 
@@ -178,8 +219,22 @@ Z.ai-Chat-Exporter/
 | # | Limitation | Reason |
 |---|---|---|
 | 1 | **Cross-origin images may not embed** | Chrome MV3 security model blocks re-fetching images from external domains without CORS headers. Same-origin and inline `data:` URIs embed correctly. |
-| 2 | **Math fonts in vector PDF** | Browsers don't bundle MathML → TrueType math font embeddings. Math in vector PDFs renders as Unicode text or rasterized equations. |
+| 2 | **Math fonts in vector PDF** | Browsers don't bundle MathML → TrueType math font embeddings. Math in vector PDFs renders as high-DPI KaTeX SVG equations. |
 | 3 | **PNG export on very long chats** | Browser canvas memory limits apply. Large chats are automatically split into sequential image slices. |
+
+---
+
+## 📅 Changelog
+
+### v2.0.0 — High-Fidelity Exporter Upgrade
+- ✅ **Offline KaTeX math** — SVG equations in PDF, OMML in Word, no CDN
+- ✅ **Full code block wrapping** — no more truncated lines in vector PDF
+- ✅ **Dynamic table rendering** — multiline cells, repeated headers at page breaks
+- ✅ **Aspect-ratio preserving images** — correct sizing in DOCX & PDF
+- ✅ **Bengali / Unicode** — rendered via high-DPI SVG text path in PDF
+- ✅ **Extension context invalidated** — clear user-facing banner with refresh instruction
+- ✅ **Download fix** — DOM anchor bypass (no `chrome.downloads` in content scripts)
+- ✅ **43 automated tests** — rich conversation regression suite
 
 ---
 
@@ -189,7 +244,7 @@ Contributions, bug reports, and feature requests are welcome!
 
 1. **Fork** this repository
 2. Create a feature branch: `git checkout -b feat/your-feature`
-3. Make your changes and run `npm test && npm run lint`
+3. Make your changes and run `npm test` and `npm run lint`
 4. Submit a **Pull Request** with a clear description
 
 ---
