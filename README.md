@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/banner.jpg" alt="Z.ai Chat Exporter Banner" width="100%" />
+</p>
+
 # Z.ai Chat Exporter v2.0.0
 
 A complete, production-grade Chrome Extension (Manifest V3) designed to export chats from `https://chat.z.ai/*` into Selectable Vector PDF, Raster PDF, DOCX, Markdown (GitHub, Obsidian, Notion presets), HTML, TXT, JSON, PNG, and CSV.
