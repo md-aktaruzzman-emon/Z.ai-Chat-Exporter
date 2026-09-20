@@ -309,25 +309,71 @@ export async function exportConversation(originalConversation, options = {}) {
             color: primaryColor
           });
           y -= 20;
-        } else if (block.kind === 'thinking') {
-          const lines = wrapText(
-            `Thinking: ${block.text}`,
-            contentWidth - 20,
-            fontRegular,
-            fontSize - 1
-          );
-          for (const l of lines) {
-            ensureSpace(14);
-            page.drawText(l, {
-              x: margin + 10,
-              y: y - 10,
+        } else if (block.kind === 'image' && (block.src || block.dataUrl)) {
+          try {
+            const imgSrc = block.dataUrl || block.src;
+            let imgBytes = null;
+            let isPng = false;
+
+            const atobFn = globalThis.atob
+              ? (s) => globalThis.atob(s)
+              : (s) => globalThis.Buffer.from(s, 'base64').toString('binary');
+            if (imgSrc.startsWith('data:image/png;base64,')) {
+              isPng = true;
+              const base64 = imgSrc.split(',')[1];
+              imgBytes = Uint8Array.from(atobFn(base64), (c) => c.charCodeAt(0));
+            } else if (imgSrc.startsWith('data:image/jpeg;base64,') || imgSrc.startsWith('data:image/jpg;base64,')) {
+              const base64 = imgSrc.split(',')[1];
+              imgBytes = Uint8Array.from(atobFn(base64), (c) => c.charCodeAt(0));
+            } else if (typeof fetch === 'function' && (imgSrc.startsWith('http') || imgSrc.startsWith('blob:'))) {
+              const res = await fetch(imgSrc);
+              const buffer = await res.arrayBuffer();
+              imgBytes = new Uint8Array(buffer);
+              const contentType = res.headers.get('content-type') || '';
+              if (contentType.includes('png') || imgSrc.toLowerCase().endsWith('.png')) {
+                isPng = true;
+              }
+            }
+
+            if (imgBytes) {
+              let embeddedImg = null;
+              if (isPng) {
+                embeddedImg = await pdfDoc.embedPng(imgBytes);
+              } else {
+                embeddedImg = await pdfDoc.embedJpg(imgBytes);
+              }
+
+              if (embeddedImg) {
+                const imgDims = embeddedImg.scale(1);
+                let displayWidth = Math.min(imgDims.width, contentWidth);
+                let displayHeight = (imgDims.height / imgDims.width) * displayWidth;
+                if (displayHeight > 400) {
+                  displayHeight = 400;
+                  displayWidth = (imgDims.width / imgDims.height) * displayHeight;
+                }
+
+                ensureSpace(displayHeight + 15);
+                page.drawImage(embeddedImg, {
+                  x: margin,
+                  y: y - displayHeight,
+                  width: displayWidth,
+                  height: displayHeight
+                });
+                y -= displayHeight + 15;
+              }
+            }
+          } catch (imgErr) {
+            console.warn('[PDF Exporter] Failed to embed image:', imgErr);
+            ensureSpace(20);
+            page.drawText(safeWinAnsiText(`[Image: ${block.alt || 'Chat Image'}]`, fontRegular), {
+              x: margin,
+              y: y - 11,
               size: fontSize - 1,
               font: fontRegular,
               color: mutedColor
             });
-            y -= 13;
+            y -= 15;
           }
-          y -= 6;
         } else {
           // Paragraph / Text / Other
           const raw = block.text || block.html?.replace(/<[^>]*>/g, '') || '';

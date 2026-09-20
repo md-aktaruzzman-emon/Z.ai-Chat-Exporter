@@ -9,6 +9,7 @@ import {
   Packer,
   Paragraph,
   TextRun,
+  ImageRun,
   HeadingLevel,
   Table,
   TableRow,
@@ -21,7 +22,7 @@ import { anonymizeConversation } from './pii.js';
 /**
  * Creates DOCX paragraphs and tables from conversation blocks.
  */
-function createBlocksDocx(msg, modelName) {
+async function createBlocksDocx(msg, modelName) {
   const isUser = msg.role === 'user';
   const roleName = isUser ? 'User' : modelName || 'Z.ai Assistant';
   const items = [];
@@ -140,6 +141,58 @@ function createBlocksDocx(msg, modelName) {
             })
           );
         }
+      } else if (block.kind === 'image' && (block.src || block.dataUrl)) {
+        try {
+          const imgSrc = block.dataUrl || block.src;
+          let imgData = null;
+
+          if (imgSrc.startsWith('data:image/')) {
+            const base64 = imgSrc.split(',')[1];
+            const atobFn = globalThis.atob
+              ? (s) => globalThis.atob(s)
+              : (s) => globalThis.Buffer.from(s, 'base64').toString('binary');
+            const binaryStr = atobFn(base64);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) {
+              bytes[i] = binaryStr.charCodeAt(i);
+            }
+            imgData = bytes.buffer;
+          } else if (typeof fetch === 'function' && (imgSrc.startsWith('http') || imgSrc.startsWith('blob:'))) {
+            const res = await fetch(imgSrc);
+            imgData = await res.arrayBuffer();
+          }
+
+          if (imgData) {
+            items.push(
+              new Paragraph({
+                spacing: { before: 100, after: 100 },
+                children: [
+                  new ImageRun({
+                    data: imgData,
+                    transformation: {
+                      width: 450,
+                      height: 300
+                    }
+                  })
+                ]
+              })
+            );
+          }
+        } catch (imgErr) {
+          console.warn('[DOCX Exporter] Image embedding failed:', imgErr);
+          items.push(
+            new Paragraph({
+              spacing: { before: 60, after: 60 },
+              children: [
+                new TextRun({
+                  text: `[Image: ${block.alt || 'Chat Image'}]`,
+                  italics: true,
+                  color: '6B7280'
+                })
+              ]
+            })
+          );
+        }
       } else {
         const raw = block.text || block.html?.replace(/<[^>]*>/g, '') || '';
         if (raw.trim()) {
@@ -208,7 +261,7 @@ export async function exportConversation(originalConversation, options = {}) {
   ];
 
   for (const msg of conv.messages) {
-    const msgParagraphs = createBlocksDocx(msg, conv.model);
+    const msgParagraphs = await createBlocksDocx(msg, conv.model);
     docChildren.push(...msgParagraphs);
   }
 

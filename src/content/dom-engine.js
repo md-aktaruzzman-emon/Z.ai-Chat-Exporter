@@ -85,12 +85,20 @@ export function deepQueryAll(selector, root = document) {
 }
 
 // Selector Candidates based on Section 11.2
-// Selector Candidates based on Section 11.2 and modern AI SPA interfaces
+// Selector Candidates based on Section 11.2 and modern AI SPA interfaces (Open WebUI / Svelte / React)
 export const THREAD_CANDIDATES = [
+  '#messages-container',
+  'div[id="messages-container"]',
+  '#chat-container',
+  'div[id="chat-container"]',
   'main [role="log"]',
   'main [role="feed"]',
   '[role="log"]',
   '[role="feed"]',
+  'div[id="app"] main',
+  'div[id="__next"] main',
+  'div[id="root"] main',
+  '#app',
   '[data-testid*="conversation" i]',
   '[data-testid*="chat" i]',
   '[data-testid*="message-list" i]',
@@ -111,14 +119,17 @@ export const THREAD_CANDIDATES = [
   'div[class*="chat-box" i]',
   'div[class*="chatBox" i]',
   '[class*="chat-container" i]',
-  'div[id="__next"] main',
-  'div[id="root"] main',
-  '#chat-container',
   'main',
   '[role="main"]'
 ];
 
 export const MESSAGE_CANDIDATES = [
+  'div[id^="message-"]',
+  '[id^="message-"]',
+  'div.user-message, div.chat-user, div.chat-assistant',
+  '[class*="user-message" i]',
+  '[class*="chat-user" i]',
+  '[class*="chat-assistant" i]',
   '[data-message-id]',
   '[data-message-author-role]',
   '[data-role="user"], [data-role="assistant"]',
@@ -186,8 +197,15 @@ let activeSavedProfile = null;
 function scoreThreadCandidate(el) {
   if (!el || typeof el.getBoundingClientRect !== 'function') return -1;
   if (el.id === 'zaix-extension-root' || el.closest?.('#zaix-extension-root')) return -1;
+  
+  // Specific Open WebUI container match
+  if (el.id === 'messages-container' || el.id === 'chat-container') {
+    return 200;
+  }
+
   const rect = el.getBoundingClientRect();
-  if (rect.width === 0 || rect.height === 0) return -1;
+  const isDisplayContents = window.getComputedStyle?.(el).display === 'contents';
+  if ((rect.width === 0 || rect.height === 0) && !isDisplayContents) return -1;
 
   let score = 0;
   // Prefer scrollable elements
@@ -203,8 +221,8 @@ function scoreThreadCandidate(el) {
     }
   }
 
-  // Bonus if located inside main
-  if (el.closest?.('main') || el.tagName === 'MAIN') {
+  // Bonus if located inside main or app root
+  if (el.closest?.('main') || el.tagName === 'MAIN' || el.closest?.('#app') || el.id === 'app') {
     score += 15;
   }
 
@@ -284,7 +302,13 @@ export function locate(overrideProfile) {
 
   const now = Date.now();
   if (!overrideProfile && cachedProfile && now - lastProfileScanTime < PROFILE_CACHE_TTL_MS) {
-    if (cachedProfile.threadContainer && document.contains(cachedProfile.threadContainer)) {
+    if (
+      cachedProfile.threadContainer &&
+      document.contains(cachedProfile.threadContainer) &&
+      Array.isArray(cachedProfile.messageBubbles) &&
+      cachedProfile.messageBubbles.length > 0 &&
+      cachedProfile.messageBubbles.every((b) => document.contains(b))
+    ) {
       return cachedProfile;
     }
   }
