@@ -261,11 +261,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
           let downloadId = null;
           try {
-            // Trigger download from service worker if supported
-            downloadId = await chrome.downloads.download({
-              url: dataUrl,
-              filename: filename || `conversation.${format}`,
-              saveAs: true
+            // Trigger download from service worker — no saveAs dialog so it goes straight to Downloads
+            downloadId = await new Promise((resolve, reject) => {
+              chrome.downloads.download(
+                {
+                  url: dataUrl,
+                  filename: filename || `conversation.${format}`
+                },
+                (id) => {
+                  if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                  } else {
+                    resolve(id);
+                  }
+                }
+              );
             });
           } catch (downloadErr) {
             console.warn(

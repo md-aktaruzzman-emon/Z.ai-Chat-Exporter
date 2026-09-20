@@ -9,9 +9,30 @@ import { createFloatingButton } from './ui/floating-button.js';
 import { createPanel } from './ui/panel.js';
 import { createPreviewModal } from './ui/preview-modal.js';
 import { createHistoryDrawer } from './ui/history-drawer.js';
-import { triggerDownload } from '../core/utils/download.js';
 import styles from './ui/styles.css?inline';
 import { t } from '../core/utils/i18n.js';
+
+/**
+ * DOM-anchor-based download safe for content script context.
+ * Does NOT use chrome.downloads (unavailable in content scripts).
+ * @param {string} url - Object URL or data URL
+ * @param {string} filename
+ * @param {boolean} [shouldRevoke=false] - true if url is a blob: URL that needs revoking
+ */
+function contentScriptDownload(url, filename, shouldRevoke = false) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || 'export';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  if (shouldRevoke) {
+    setTimeout(() => {
+      try { URL.revokeObjectURL(url); } catch { /* ignore */ }
+    }, 60000);
+  }
+}
 
 let shadowRootHost = null;
 let shadowRoot = null;
@@ -55,10 +76,9 @@ function initContainer() {
   historyDrawerInstance = createHistoryDrawer({
     onClose: () => {},
     onReDownload: (entry) => {
-      triggerDownload({
-        data: entry.blob,
-        filename: `${entry.title}.${entry.format}`
-      });
+      if (entry.blob instanceof Blob) {
+        contentScriptDownload(URL.createObjectURL(entry.blob), `${entry.title}.${entry.format}`, true);
+      }
     }
   });
   shadowRoot.appendChild(historyDrawerInstance.element);
@@ -146,6 +166,7 @@ async function handleExport(options) {
 
     let response = null;
     try {
+      // Give the offscreen document up to 30s — creation + heavy PDF rendering can take 10-15s
       response = await Promise.race([
         chrome.runtime.sendMessage({
           type: 'EXPORT_REQUEST',
@@ -156,7 +177,7 @@ async function handleExport(options) {
           options
         }),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('BACKGROUND_TIMEOUT')), 5000)
+          setTimeout(() => reject(new Error('BACKGROUND_TIMEOUT')), 30000)
         )
       ]);
     } catch (bgErr) {
@@ -166,13 +187,12 @@ async function handleExport(options) {
       );
     }
 
-    if (response && response.ok && response.data?.dataUrl) {
-      // Background offscreen succeeded
-      await triggerDownload({
-        data: response.data.dataUrl,
-        filename: response.data.filename,
-        mime: response.data.mime
-      });
+    if (response && response.ok) {
+      // Background offscreen succeeded — service worker already triggered chrome.downloads
+      // If download didn't fire (no downloadId) fall back to DOM anchor
+      if (!response.data?.downloadId && response.data?.dataUrl) {
+        contentScriptDownload(response.data.dataUrl, response.data.filename);
+      }
 
       panelInstance.setStatus(t('statusComplete'));
       setTimeout(() => {
@@ -180,7 +200,7 @@ async function handleExport(options) {
         panelInstance.setStatus('');
       }, 1500);
     } else {
-      // In-page direct rendering fallback (guarantees export succeeds even if SW/offscreen fails)
+      // In-page direct rendering fallback (content script context — must NOT use chrome.downloads)
       panelInstance.setStatus('Generating file...');
       const { EXPORTERS } = await import('../exporters/index.js');
       const exporterDef = EXPORTERS[options.format];
@@ -192,11 +212,16 @@ async function handleExport(options) {
       const renderFn = exporterModule.exportConversation || exporterModule.default;
       const renderResult = await renderFn(conversation, options);
 
-      await triggerDownload({
-        data: renderResult.blob || renderResult.dataUrl,
-        filename: renderResult.filename,
-        mime: renderResult.mime || exporterDef.mime
-      });
+      // Direct DOM anchor download — no chrome.downloads (not available in content scripts)
+      const blob = renderResult.blob;
+      const filename = renderResult.filename;
+      if (blob instanceof Blob) {
+        contentScriptDownload(URL.createObjectURL(blob), filename, true);
+      } else if (typeof renderResult.dataUrl === 'string') {
+        contentScriptDownload(renderResult.dataUrl, filename, false);
+      } else {
+        throw new Error('EXPORT_FAILED: Exporter returned neither a Blob nor a dataUrl');
+      }
 
       panelInstance.setStatus(t('statusComplete'));
       setTimeout(() => {
