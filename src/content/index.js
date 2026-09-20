@@ -29,7 +29,11 @@ function contentScriptDownload(url, filename, shouldRevoke = false) {
   document.body.removeChild(a);
   if (shouldRevoke) {
     setTimeout(() => {
-      try { URL.revokeObjectURL(url); } catch { /* ignore */ }
+      try {
+        URL.revokeObjectURL(url);
+      } catch {
+        /* ignore */
+      }
     }, 60000);
   }
 }
@@ -77,7 +81,11 @@ function initContainer() {
     onClose: () => {},
     onReDownload: (entry) => {
       if (entry.blob instanceof Blob) {
-        contentScriptDownload(URL.createObjectURL(entry.blob), `${entry.title}.${entry.format}`, true);
+        contentScriptDownload(
+          URL.createObjectURL(entry.blob),
+          `${entry.title}.${entry.format}`,
+          true
+        );
       }
     }
   });
@@ -176,9 +184,7 @@ async function handleExport(options) {
           conversation,
           options
         }),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('BACKGROUND_TIMEOUT')), 30000)
-        )
+        new Promise((_, reject) => setTimeout(() => reject(new Error('BACKGROUND_TIMEOUT')), 30000))
       ]);
     } catch (bgErr) {
       console.warn(

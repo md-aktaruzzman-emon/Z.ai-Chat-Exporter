@@ -176,7 +176,7 @@ describe('5. Scraper Fixtures Integration', () => {
     expect(codeBlocks.map((c) => c.language)).toEqual(['javascript', 'python', 'cpp']);
   });
 
-  it('parses math equations from math.html fixture', () => {
+  it('parses math equations and prevents duplicate inline math blocks from math.html fixture', () => {
     const fixturePath = path.resolve(__dirname, 'fixtures/math.html');
     const fixtureHtml = fs.readFileSync(fixturePath, 'utf8');
 
@@ -187,8 +187,17 @@ describe('5. Scraper Fixtures Integration', () => {
     const blocks = parseBlocks(assistantBubble);
     const mathBlocks = blocks.filter((b) => b.kind === 'math');
 
-    expect(mathBlocks.length).toBeGreaterThanOrEqual(2);
-    expect(mathBlocks.some((m) => m.tex.includes('E = mc^2'))).toBe(true);
+    // Display math blocks are properly extracted as block-level math
+    expect(mathBlocks.length).toBe(2);
+    expect(mathBlocks.some((m) => m.tex.includes('f(x)'))).toBe(true);
+    expect(mathBlocks.some((m) => m.tex.includes('\\nabla'))).toBe(true);
+    expect(mathBlocks.every((m) => m.displayMode === true)).toBe(true);
+
+    // Paragraph preserves inline math rich HTML without creating a duplicate block
+    const pWithMath = blocks.find((b) => b.kind === 'paragraph' && b.html.includes('E = mc^2'));
+    expect(pWithMath).toBeDefined();
+    // Verify duplicate math prevention: inline math does NOT create separate standalone block
+    expect(mathBlocks.some((m) => m.tex.includes('E = mc^2'))).toBe(false);
   });
 
   it('parses table structure from table.html fixture', () => {
@@ -537,7 +546,10 @@ describe('7. Exporters File Generation', () => {
         text: 'Q1. Explain Project vs Process with examples',
         blocks: [
           { kind: 'heading', level: 1, text: 'Q1. Project vs Process' },
-          { kind: 'paragraph', html: '<p><strong>Question:</strong> What is the core difference between a project and ongoing operations?</p>' }
+          {
+            kind: 'paragraph',
+            html: '<p><strong>Question:</strong> What is the core difference between a project and ongoing operations?</p>'
+          }
         ]
       },
       {
@@ -563,14 +575,13 @@ describe('7. Exporters File Generation', () => {
                 { text: 'Project', isHeader: true },
                 { text: 'Process', isHeader: true }
               ],
-              [
-                { text: 'Nature' },
-                { text: 'Unique' },
-                { text: 'Repetitive' }
-              ]
+              [{ text: 'Nature' }, { text: 'Unique' }, { text: 'Repetitive' }]
             ]
           },
-          { kind: 'quote', text: 'Conclusion: Managing projects requires adaptive planning, whereas process work requires standard operating procedures.' }
+          {
+            kind: 'quote',
+            text: 'Conclusion: Managing projects requires adaptive planning, whereas process work requires standard operating procedures.'
+          }
         ]
       }
     ];

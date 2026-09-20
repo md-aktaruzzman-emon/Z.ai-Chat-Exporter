@@ -197,7 +197,7 @@ let activeSavedProfile = null;
 function scoreThreadCandidate(el) {
   if (!el || typeof el.getBoundingClientRect !== 'function') return -1;
   if (el.id === 'zaix-extension-root' || el.closest?.('#zaix-extension-root')) return -1;
-  
+
   // Specific Open WebUI container match
   if (el.id === 'messages-container' || el.id === 'chat-container') {
     return 200;
@@ -459,7 +459,9 @@ export function locate(overrideProfile) {
     if (mainCandidate) {
       // Look for prose blocks, code blocks, or response actions
       const contentNodes = Array.from(
-        mainCandidate.querySelectorAll('[class*="prose" i], [class*="markdown" i], pre, .katex-display')
+        mainCandidate.querySelectorAll(
+          '[class*="prose" i], [class*="markdown" i], pre, .katex-display'
+        )
       ).filter((el) => !el.closest?.('#zaix-extension-root'));
 
       if (contentNodes.length > 0) {
@@ -476,13 +478,19 @@ export function locate(overrideProfile) {
             if (
               cur.parentElement.children.length >= 2 &&
               ((cur.className && /message|turn|chat|bubble|row|item/i.test(cur.className)) ||
-               (cur.parentElement.className && /message-list|messages|thread|conversation/i.test(cur.parentElement.className)))
+                (cur.parentElement.className &&
+                  /message-list|messages|thread|conversation/i.test(cur.parentElement.className)))
             ) {
               break;
             }
             cur = cur.parentElement;
           }
-          if (cur && cur !== mainCandidate && cur !== document.body && !cur.closest?.('#zaix-extension-root')) {
+          if (
+            cur &&
+            cur !== mainCandidate &&
+            cur !== document.body &&
+            !cur.closest?.('#zaix-extension-root')
+          ) {
             turnSet.add(cur);
           }
         }
@@ -493,13 +501,16 @@ export function locate(overrideProfile) {
 
       // If still 0, collect direct children of the deepest container that has multiple children with text
       if (messageBubbles.length === 0) {
-        const potentialContainers = Array.from(mainCandidate.querySelectorAll('div, section')).filter((c) => {
+        const potentialContainers = Array.from(
+          mainCandidate.querySelectorAll('div, section')
+        ).filter((c) => {
           if (c.id === 'zaix-extension-root' || c.closest?.('#zaix-extension-root')) return false;
           return c.children.length >= 2 && (c.textContent?.trim().length || 0) > 30;
         });
         for (const container of potentialContainers) {
           const directChildrenWithText = Array.from(container.children).filter((ch) => {
-            if (ch.id === 'zaix-extension-root' || ch.closest?.('#zaix-extension-root')) return false;
+            if (ch.id === 'zaix-extension-root' || ch.closest?.('#zaix-extension-root'))
+              return false;
             return (ch.textContent?.trim().length || 0) > 10;
           });
           if (directChildrenWithText.length >= 2) {
@@ -562,7 +573,11 @@ export function locate(overrideProfile) {
       .replace(/[-|]\s*Z\.ai.*$/i, '')
       .replace(/^Z\.ai\s*[-|:]\s*/i, '')
       .trim();
-    if (cleanDocTitle && !/^z\.ai$/i.test(cleanDocTitle) && !cleanDocTitle.toLowerCase().includes('z.ai - advanced')) {
+    if (
+      cleanDocTitle &&
+      !/^z\.ai$/i.test(cleanDocTitle) &&
+      !cleanDocTitle.toLowerCase().includes('z.ai - advanced')
+    ) {
       title = cleanDocTitle;
     }
   }

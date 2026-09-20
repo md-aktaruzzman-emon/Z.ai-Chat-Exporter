@@ -1,6 +1,7 @@
 /**
  * @file pdf-raster.js
- * Raster PDF generator using html2pdf.js / html2canvas in offscreen document.
+ * High-fidelity raster PDF generator using html2pdf.js / html2canvas in offscreen document.
+ * Embeds offline KaTeX CSS and rendered formulas for pixel-perfect visual fidelity.
  * Section 16.2 of the authoritative specification.
  */
 
@@ -8,9 +9,11 @@ import html2pdf from 'html2pdf.js';
 import { generateFilename } from '../core/utils/filename.js';
 import { sanitizeHtml } from '../core/sanitize.js';
 import { anonymizeConversation } from './pii.js';
+import { renderMathToHtml } from '../core/math-renderer.js';
+import { KATEX_CSS } from '../core/katex-css.js';
 
 /**
- * Builds HTML markup for raster PDF rendering.
+ * Builds high-fidelity HTML markup with embedded KaTeX CSS and offline equations.
  */
 function buildRenderHtml(conv, theme) {
   const isDark = theme === 'dark';
@@ -33,11 +36,13 @@ function buildRenderHtml(conv, theme) {
     if (Array.isArray(m.blocks) && m.blocks.length > 0) {
       for (const block of m.blocks) {
         if (block.kind === 'code') {
-          contentHtml += `<pre style="background: ${codeBg}; color: #f8fafc; padding: 12px 14px; border-radius: 6px; font-family: Consolas, monospace; font-size: 12px; line-height: 1.5; margin: 10px 0; overflow-x: auto;"><code>${sanitizeHtml(block.code || '')}</code></pre>`;
+          contentHtml += `<pre style="background: ${codeBg}; color: #f8fafc; padding: 12px 14px; border-radius: 6px; font-family: Consolas, monospace; font-size: 12px; line-height: 1.5; margin: 10px 0; overflow-x: auto; white-space: pre-wrap; word-break: break-word;"><code>${sanitizeHtml(block.code || '')}</code></pre>`;
         } else if (block.kind === 'math') {
-          contentHtml += `<div style="font-family: serif; font-style: italic; padding: 8px 0; color: #6366f1; font-size: 14px;">$$ ${sanitizeHtml(block.tex || '')} $$</div>`;
+          // Render via local KaTeX (zero external network / zero raw $$)
+          const mathHtml = renderMathToHtml(block.tex || '', block.displayMode);
+          contentHtml += `<div style="padding: 10px 0; text-align: ${block.displayMode ? 'center' : 'left'}; color: #4f46e5; margin: 6px 0;" class="zaix-math-block">${mathHtml}</div>`;
         } else if (block.kind === 'thinking') {
-          contentHtml += `<div style="margin: 8px 0; padding: 10px 14px; background: rgba(100,116,139,0.08); border-left: 3px solid #94a3b8; border-radius: 4px; font-size: 12px; color: #64748b; font-style: italic;"><strong>Thinking:</strong> ${sanitizeHtml(block.text || '')}</div>`;
+          contentHtml += `<div style="margin: 8px 0; padding: 10px 14px; background: rgba(100,116,139,0.08); border-left: 3px solid #94a3b8; border-radius: 4px; font-size: 12px; color: #64748b; font-style: italic;"><strong>Thinking Process:</strong> ${sanitizeHtml(block.text || '')}</div>`;
         } else if (block.kind === 'table') {
           contentHtml += `<div style="overflow-x: auto; margin: 12px 0;">${block.html}</div>`;
         } else if (block.kind === 'image') {
@@ -51,15 +56,19 @@ function buildRenderHtml(conv, theme) {
         } else if (block.kind === 'list') {
           contentHtml += `<div style="margin: 8px 0;">${block.html}</div>`;
         } else {
-          contentHtml += block.html || `<p style="margin: 6px 0 10px 0; line-height: 1.6;">${sanitizeHtml(block.text || '')}</p>`;
+          contentHtml +=
+            block.html ||
+            `<p style="margin: 6px 0 10px 0; line-height: 1.6;">${sanitizeHtml(block.text || '')}</p>`;
         }
       }
     } else {
-      contentHtml = m.html || `<p style="margin: 6px 0 10px 0; line-height: 1.6;">${sanitizeHtml(m.text || '')}</p>`;
+      contentHtml =
+        m.html ||
+        `<p style="margin: 6px 0 10px 0; line-height: 1.6;">${sanitizeHtml(m.text || '')}</p>`;
     }
 
     messagesHtml += `
-      <div style="margin-bottom: 22px; padding: 16px 18px; border-radius: 10px; background: ${bubbleBg}; border: 1px solid ${border}; page-break-inside: avoid;">
+      <div class="zaix-message-card" style="margin-bottom: 20px; padding: 16px 18px; border-radius: 10px; background: ${bubbleBg}; border: 1px solid ${border}; page-break-inside: avoid;">
         <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px; color: ${roleColor};">${sanitizeHtml(roleName)}</div>
         <div style="line-height: 1.6; font-size: 13.5px;" class="zaix-message-body">${contentHtml}</div>
       </div>
@@ -67,8 +76,9 @@ function buildRenderHtml(conv, theme) {
   }
 
   return `
-    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: ${bg}; color: ${text}; padding: 32px 36px; width: 750px; box-sizing: border-box;">
+    <div class="zaix-raster-container" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Bengali', Kalpurush, Roboto, Helvetica, Arial, sans-serif; background: ${bg}; color: ${text}; padding: 32px 36px; width: 750px; box-sizing: border-box;">
       <style>
+        ${KATEX_CSS}
         table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
         th, td { border: 1px solid ${border}; padding: 8px 10px; text-align: left; }
         th { background: ${tableHeaderBg}; font-weight: bold; }
@@ -79,6 +89,7 @@ function buildRenderHtml(conv, theme) {
         code { font-family: Consolas, monospace; font-size: 90%; background: rgba(100,116,139,0.12); padding: 2px 4px; border-radius: 3px; }
         pre code { background: none; padding: 0; }
         img, svg, canvas { max-width: 100%; height: auto; }
+        .zaix-message-card { page-break-inside: avoid; }
       </style>
       <div style="border-bottom: 2px solid ${border}; padding-bottom: 14px; margin-bottom: 24px;">
         <h1 style="font-size: 24px; font-weight: bold; margin: 0 0 6px 0; color: ${text};">${sanitizeHtml(conv.title)}</h1>
@@ -110,7 +121,8 @@ export async function exportConversation(originalConversation, options = {}) {
     filename: 'export.pdf',
     image: { type: 'jpeg', quality: 0.98 },
     html2canvas: { scale: 2, useCORS: true },
-    jsPDF: { unit: 'mm', format: pageFormat, orientation: 'portrait' }
+    jsPDF: { unit: 'mm', format: pageFormat, orientation: 'portrait' },
+    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
   };
 
   try {

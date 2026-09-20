@@ -7,11 +7,13 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { generateFilename } from '../core/utils/filename.js';
 import { anonymizeConversation } from './pii.js';
-import { imageSourceToPngBytes } from '../core/utils/image.js';
+import { imageSourceToPngBytes, fitDimensions } from '../core/utils/image.js';
+import { renderMathToSvg } from '../core/math-renderer.js';
+import { normalizeTableRows, computeColumnWidths, wrapCellLines } from '../core/table-layout.js';
 
 // Comprehensive symbol & diagram transliterations for WinAnsi StandardFonts
 const SYMBOL_REPLACEMENTS = {
-  // Tree & Directory structure characters (prevents ??? in project diagrams)
+  // Tree & Directory structure characters
   '├──': '|-- ',
   '└──': '`-- ',
   '│': '|',
@@ -109,8 +111,37 @@ const SYMBOL_REPLACEMENTS = {
 const fontSupportCache = new WeakMap();
 
 /**
+ * Checks if a string can be encoded by the WinAnsi font without errors.
+ * @param {string} str
+ * @param {import('pdf-lib').PDFFont} font
+ * @returns {boolean}
+ */
+export function canEncodeWithFont(str, font) {
+  if (!str) return true;
+  for (const char of str) {
+    try {
+      font.encodeText(char);
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Checks if a string contains complex Unicode scripts (e.g. Bengali, Indic, CJK, Emojis).
+ * @param {string} str
+ * @returns {boolean}
+ */
+export function hasComplexUnicode(str) {
+  if (!str) return false;
+  // Bengali: \u0980-\u09FF, Arabic: \u0600-\u06FF, Devanagari: \u0900-\u097F, CJK: \u4E00-\u9FFF, Emojis: \uD800-\uDFFF
+  return /[\u0980-\u09FF\u0900-\u097F\u0600-\u06FF\u4E00-\u9FFF\uD800-\uDFFF]/.test(str);
+}
+
+/**
  * Safely encodes text for StandardFonts without throwing WinAnsi encoding errors.
- * Replaces unencodable characters with transliterations or safe fallbacks.
+ * Applies symbol transliterations. For unencodable characters, retains readable representation.
  * @param {string} str
  * @param {import('pdf-lib').PDFFont} font
  * @returns {string}
@@ -142,30 +173,35 @@ export function safeWinAnsiText(str, font) {
       }
       charCache.set(char, supported);
     }
-    result += supported ? char : char.charCodeAt(0) > 127 ? ' ' : ' ';
+    result += supported ? char : '?';
   }
   return result;
 }
 
 /**
  * Splits text into lines that fit within a maximum width given a font and size.
- * Automatically breaks words that are wider than maxWidth to prevent clipping.
+ * Automatically wraps words and long tokens to prevent clipping.
  */
 function wrapText(text, maxWidth, font, fontSize) {
   if (!text) return [];
-  const safeStr = safeWinAnsiText(text, font);
-  const words = safeStr.split(/\s+/);
+  const words = text.split(/\s+/);
   const lines = [];
   let currentLine = '';
 
   for (let word of words) {
     if (!word) continue;
-    while (font.widthOfTextAtSize(word, fontSize) > maxWidth) {
+
+    const measureWord = (w) => {
+      try {
+        return font.widthOfTextAtSize(safeWinAnsiText(w, font), fontSize);
+      } catch {
+        return w.length * (fontSize * 0.55);
+      }
+    };
+
+    while (measureWord(word) > maxWidth && word.length > 2) {
       let sliceLen = Math.max(1, Math.floor(word.length * 0.7));
-      while (
-        sliceLen > 1 &&
-        font.widthOfTextAtSize(word.substring(0, sliceLen), fontSize) > maxWidth
-      ) {
+      while (sliceLen > 1 && measureWord(word.substring(0, sliceLen)) > maxWidth) {
         sliceLen--;
       }
       const chunk = word.substring(0, sliceLen);
@@ -178,7 +214,13 @@ function wrapText(text, maxWidth, font, fontSize) {
     }
 
     const testLine = currentLine ? `${currentLine} ${word}` : word;
-    const testWidth = font.widthOfTextAtSize(testLine, fontSize);
+    let testWidth = 0;
+    try {
+      testWidth = font.widthOfTextAtSize(safeWinAnsiText(testLine, font), fontSize);
+    } catch {
+      testWidth = testLine.length * (fontSize * 0.55);
+    }
+
     if (testWidth <= maxWidth) {
       currentLine = testLine;
     } else {
@@ -188,6 +230,33 @@ function wrapText(text, maxWidth, font, fontSize) {
   }
   if (currentLine) lines.push(currentLine);
   return lines;
+}
+
+/**
+ * Creates an SVG data URL for a text string that contains complex Unicode (e.g. Bengali).
+ * @param {string} text
+ * @param {number} fontSize
+ * @param {string} colorHex
+ * @param {boolean} isBold
+ * @param {number} maxWidth
+ * @returns {string} SVG data URL
+ */
+function createUnicodeTextSvgDataUrl(text, fontSize, colorHex, isBold, maxWidth) {
+  const safeText = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  const height = Math.round(fontSize * 1.5);
+  const width = Math.min(Math.max(text.length * fontSize * 0.7, 50), maxWidth);
+
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  <text x="0" y="${fontSize * 1.1}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Bengali', Kalpurush, sans-serif" font-size="${fontSize}px" font-weight="${isBold ? 'bold' : 'normal'}" fill="${colorHex}">${safeText}</text>
+</svg>`.trim();
+
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
 const PAGE_FORMATS = {
@@ -203,7 +272,9 @@ const MARGINS = {
 };
 
 /**
- * Generates a clean vector PDF with selectable text.
+ * Generates a clean vector PDF with selectable text, rendered math formulas,
+ * multiline table layouts, full code blocks, and Bengali/Unicode support.
+ *
  * @param {import('../core/conversation-model.js').Conversation} originalConversation
  * @param {Object} options
  * @returns {Promise<{ blob: Blob, filename: string, mime: string }>}
@@ -231,8 +302,11 @@ export async function exportConversation(originalConversation, options = {}) {
   const isDark = resolvedTheme === 'dark';
   const bgColor = isDark ? rgb(0.1, 0.1, 0.13) : rgb(1, 1, 1);
   const textColor = isDark ? rgb(0.95, 0.95, 0.95) : rgb(0.12, 0.16, 0.22);
+  const textColorHex = isDark ? '#f3f4f6' : '#1e293b';
   const mutedColor = isDark ? rgb(0.65, 0.65, 0.7) : rgb(0.42, 0.45, 0.5);
+  const mutedColorHex = isDark ? '#9ca3af' : '#64748b';
   const primaryColor = isDark ? rgb(0.55, 0.5, 0.95) : rgb(0.31, 0.27, 0.9);
+  const primaryColorHex = isDark ? '#818cf8' : '#4f46e5';
   const userRoleColor = isDark ? rgb(0.55, 0.5, 0.95) : rgb(0.31, 0.27, 0.9);
   const assistantRoleColor = isDark ? rgb(0.3, 0.8, 0.6) : rgb(0.05, 0.6, 0.4);
   const codeBgColor = isDark ? rgb(0.15, 0.15, 0.2) : rgb(0.95, 0.96, 0.98);
@@ -272,26 +346,72 @@ export async function exportConversation(originalConversation, options = {}) {
     }
   }
 
+  /**
+   * Draws a line of text, automatically using high-DPI image embedding for complex Unicode (e.g. Bengali).
+   */
+  async function drawTextLine(text, x, curY, size, font, color, colorHex, isBold = false) {
+    if (!text) return;
+    if (hasComplexUnicode(text)) {
+      try {
+        const svgData = createUnicodeTextSvgDataUrl(text, size, colorHex, isBold, contentWidth);
+        const convResult = await imageSourceToPngBytes(svgData);
+        if (convResult && convResult.bytes) {
+          const img = await pdfDoc.embedPng(convResult.bytes);
+          const fitted = fitDimensions(
+            convResult.width,
+            convResult.height,
+            contentWidth,
+            size * 1.8
+          );
+          page.drawImage(img, {
+            x,
+            y: curY - fitted.height + 2,
+            width: fitted.width,
+            height: fitted.height
+          });
+          return;
+        }
+      } catch {
+        // fallback to vector text
+      }
+    }
+
+    const safeStr = safeWinAnsiText(text, font);
+    page.drawText(safeStr, {
+      x,
+      y: curY,
+      size,
+      font,
+      color
+    });
+  }
+
   // Draw Title
   ensureSpace(45);
-  page.drawText(safeWinAnsiText(conv.title || 'Z.ai Conversation', fontBold), {
-    x: margin,
-    y: y - 22,
-    size: 18,
-    font: fontBold,
-    color: textColor
-  });
+  await drawTextLine(
+    conv.title || 'Z.ai Conversation',
+    margin,
+    y - 22,
+    18,
+    fontBold,
+    textColor,
+    textColorHex,
+    true
+  );
   y -= 32;
 
   // Metadata Header
   const dateStr = new Date(conv.createdAt).toLocaleString();
-  page.drawText(safeWinAnsiText(`Model: ${conv.model}  |  Date: ${dateStr}`, fontRegular), {
-    x: margin,
-    y: y - 10,
-    size: 9,
-    font: fontRegular,
-    color: mutedColor
-  });
+  await drawTextLine(
+    `Model: ${conv.model}  |  Date: ${dateStr}`,
+    margin,
+    y - 10,
+    9,
+    fontRegular,
+    mutedColor,
+    mutedColorHex,
+    false
+  );
   y -= 22;
 
   // Horizontal divider
@@ -319,13 +439,16 @@ export async function exportConversation(originalConversation, options = {}) {
       const msg = conv.messages[i];
       const snippet = (msg.text || '').substring(0, 45).replace(/\n/g, ' ');
       ensureSpace(14);
-      page.drawText(safeWinAnsiText(`#${i + 1} [${msg.role}]: ${snippet}...`, fontRegular), {
-        x: margin + 10,
-        y: y - 10,
-        size: 8.5,
-        font: fontRegular,
-        color: mutedColor
-      });
+      await drawTextLine(
+        `#${i + 1} [${msg.role}]: ${snippet}...`,
+        margin + 10,
+        y - 10,
+        8.5,
+        fontRegular,
+        mutedColor,
+        mutedColorHex,
+        false
+      );
       y -= 14;
     }
     y -= 16;
@@ -338,7 +461,7 @@ export async function exportConversation(originalConversation, options = {}) {
 
     ensureSpace(32);
 
-    // Speaker Header with round badge accent
+    // Speaker Header
     page.drawText(safeWinAnsiText(roleLabel, fontBold), {
       x: margin,
       y: y - 12,
@@ -351,20 +474,24 @@ export async function exportConversation(originalConversation, options = {}) {
     if (Array.isArray(msg.blocks) && msg.blocks.length > 0) {
       for (const block of msg.blocks) {
         if (block.kind === 'heading') {
-          const hSize = block.level === 1 ? fontSize + 4 : block.level === 2 ? fontSize + 2.5 : fontSize + 1.5;
+          const hSize =
+            block.level === 1 ? fontSize + 4 : block.level === 2 ? fontSize + 2.5 : fontSize + 1.5;
           const hText = block.text || block.html?.replace(/<[^>]*>/g, '') || '';
           const lines = wrapText(hText, contentWidth, fontBold, hSize);
 
           ensureSpace(lines.length * (hSize + 4) + 14);
           y -= 8;
           for (const l of lines) {
-            page.drawText(l, {
-              x: margin,
-              y: y - hSize,
-              size: hSize,
-              font: fontBold,
-              color: textColor
-            });
+            await drawTextLine(
+              l,
+              margin,
+              y - hSize,
+              hSize,
+              fontBold,
+              textColor,
+              textColorHex,
+              true
+            );
             y -= hSize + 4;
           }
           y -= 6;
@@ -389,13 +516,16 @@ export async function exportConversation(originalConversation, options = {}) {
                 });
 
                 for (let li = 0; li < lines.length; li++) {
-                  page.drawText(lines[li], {
-                    x: margin + 8 + bulletWidth + 4,
-                    y: y - fontSize,
-                    size: fontSize,
-                    font: fontRegular,
-                    color: textColor
-                  });
+                  await drawTextLine(
+                    lines[li],
+                    margin + 8 + bulletWidth + 4,
+                    y - fontSize,
+                    fontSize,
+                    fontRegular,
+                    textColor,
+                    textColorHex,
+                    false
+                  );
                   y -= fontSize + 4;
                 }
               }
@@ -407,13 +537,16 @@ export async function exportConversation(originalConversation, options = {}) {
             const lines = wrapText(raw, contentWidth, fontRegular, fontSize);
             for (const l of lines) {
               ensureSpace(fontSize + 5);
-              page.drawText(l, {
-                x: margin,
-                y: y - fontSize,
-                size: fontSize,
-                font: fontRegular,
-                color: textColor
-              });
+              await drawTextLine(
+                l,
+                margin,
+                y - fontSize,
+                fontSize,
+                fontRegular,
+                textColor,
+                textColorHex,
+                false
+              );
               y -= fontSize + 4;
             }
             y -= 6;
@@ -425,28 +558,43 @@ export async function exportConversation(originalConversation, options = {}) {
 
           ensureSpace(blockH + 8);
           page.drawLine({
-            start: { x: margin + 4, y: y },
+            start: { x: margin + 4, y },
             end: { x: margin + 4, y: y - blockH },
             thickness: 2.5,
             color: primaryColor
           });
 
           for (const l of lines) {
-            page.drawText(l, {
-              x: margin + 16,
-              y: y - fontSize,
-              size: fontSize,
-              font: fontRegular,
-              color: mutedColor
-            });
+            await drawTextLine(
+              l,
+              margin + 16,
+              y - fontSize,
+              fontSize,
+              fontRegular,
+              mutedColor,
+              mutedColorHex,
+              false
+            );
             y -= fontSize + 4;
           }
           y -= 8;
         } else if (block.kind === 'code') {
-          const codeLines = (block.code || '').split('\n');
-          const blockHeight = codeLines.length * 13 + 16;
+          // Wrap long code lines so no code is ever clipped or truncated
+          const rawLines = (block.code || '').split('\n');
+          const maxCodeWidth = contentWidth - 20;
+          const codeLines = [];
 
-          ensureSpace(Math.min(blockHeight, 200));
+          for (const rawLine of rawLines) {
+            const subLines = wrapText(rawLine, maxCodeWidth, fontMono, 8.5);
+            if (subLines.length > 0) {
+              codeLines.push(...subLines);
+            } else {
+              codeLines.push('');
+            }
+          }
+
+          const blockHeight = codeLines.length * 13 + 16;
+          ensureSpace(Math.min(blockHeight, 150));
 
           // Draw code background box
           const boxTop = y;
@@ -462,75 +610,190 @@ export async function exportConversation(originalConversation, options = {}) {
           y -= 8;
           for (const line of codeLines) {
             ensureSpace(14);
-            const safeLine = safeWinAnsiText(line, fontMono);
-            const truncated = safeLine.length > 85 ? safeLine.substring(0, 85) + '...' : safeLine;
-            page.drawText(truncated, {
-              x: margin + 8,
-              y: y - 9,
-              size: 8.5,
-              font: fontMono,
-              color: textColor
-            });
+            await drawTextLine(
+              line,
+              margin + 8,
+              y - 9,
+              8.5,
+              fontMono,
+              textColor,
+              textColorHex,
+              false
+            );
             y -= 13;
           }
           y -= 10;
-        } else if (block.kind === 'table' && Array.isArray(block.rows) && block.rows.length > 0) {
-          const rows = block.rows;
-          const numCols = Math.max(...rows.map((r) => r.length), 1);
-          const colWidth = contentWidth / numCols;
+        } else if (block.kind === 'table') {
+          // Dynamic content-aware table without truncation
+          const tableRows = normalizeTableRows(block);
+          if (tableRows.length > 0) {
+            const colWidths = computeColumnWidths(tableRows, contentWidth);
 
-          ensureSpace(30);
-          for (let rIdx = 0; rIdx < rows.length; rIdx++) {
-            const row = rows[rIdx];
-            const isHeader = rIdx === 0 || row.some((c) => c.isHeader);
-            const rowHeight = 22;
+            ensureSpace(35);
 
-            ensureSpace(rowHeight + 4);
+            for (let rIdx = 0; rIdx < tableRows.length; rIdx++) {
+              const row = tableRows[rIdx];
+              const isHeader = rIdx === 0 || row.some((c) => c.isHeader);
+              const cellFont = isHeader ? fontBold : fontRegular;
+              const cellFontSize = fontSize - 1;
 
-            if (isHeader) {
-              page.drawRectangle({
-                x: margin,
-                y: y - rowHeight,
-                width: contentWidth,
-                height: rowHeight,
-                color: tableHeaderBg
+              // Compute wrapped lines for each cell in this row
+              const rowCellsWithLines = row.map((cell, cIdx) => {
+                const w = colWidths[cIdx] || 50;
+                const lines = wrapCellLines(cell.text, w - 10, (str) => {
+                  try {
+                    return cellFont.widthOfTextAtSize(safeWinAnsiText(str, cellFont), cellFontSize);
+                  } catch {
+                    return str.length * (cellFontSize * 0.55);
+                  }
+                });
+                return { ...cell, lines, width: w };
               });
-            }
 
-            page.drawLine({
-              start: { x: margin, y: y - rowHeight },
-              end: { x: margin + contentWidth, y: y - rowHeight },
-              thickness: 0.8,
-              color: borderColor
-            });
+              // Dynamic content-aware row height (never fixed at 22px)
+              const maxLines = Math.max(...rowCellsWithLines.map((c) => c.lines.length), 1);
+              const rowHeight = maxLines * (cellFontSize + 3) + 8;
 
-            for (let cIdx = 0; cIdx < row.length; cIdx++) {
-              const cell = row[cIdx];
-              const cellText = safeWinAnsiText(cell.text || '', isHeader ? fontBold : fontRegular);
-              const cellX = margin + cIdx * colWidth + 6;
+              // Check page boundary. If row doesn't fit, add page and repeat header
+              if (y - rowHeight < margin) {
+                ensureSpace(rowHeight + 10);
+                if (!isHeader && tableRows[0]) {
+                  // Re-draw header row on new page
+                  const headerHeight = 22;
+                  page.drawRectangle({
+                    x: margin,
+                    y: y - headerHeight,
+                    width: contentWidth,
+                    height: headerHeight,
+                    color: tableHeaderBg
+                  });
+                  let hx = margin;
+                  for (let hIdx = 0; hIdx < tableRows[0].length; hIdx++) {
+                    const hCell = tableRows[0][hIdx];
+                    const hw = colWidths[hIdx] || 50;
+                    await drawTextLine(
+                      hCell.text,
+                      hx + 5,
+                      y - 14,
+                      cellFontSize,
+                      fontBold,
+                      textColor,
+                      textColorHex,
+                      true
+                    );
+                    hx += hw;
+                  }
+                  y -= headerHeight;
+                }
+              }
 
-              page.drawText(cellText.substring(0, 35), {
-                x: cellX,
-                y: y - 14,
-                size: fontSize - 1,
-                font: isHeader ? fontBold : fontRegular,
-                color: textColor
+              // Background for header
+              if (isHeader) {
+                page.drawRectangle({
+                  x: margin,
+                  y: y - rowHeight,
+                  width: contentWidth,
+                  height: rowHeight,
+                  color: tableHeaderBg
+                });
+              }
+
+              // Cell bottom border
+              page.drawLine({
+                start: { x: margin, y: y - rowHeight },
+                end: { x: margin + contentWidth, y: y - rowHeight },
+                thickness: 0.8,
+                color: borderColor
               });
+
+              // Draw cell content
+              let currentX = margin;
+              for (let cIdx = 0; cIdx < rowCellsWithLines.length; cIdx++) {
+                const cell = rowCellsWithLines[cIdx];
+                const cellX = currentX + 5;
+                let lineY = y - cellFontSize - 4;
+
+                for (const line of cell.lines) {
+                  await drawTextLine(
+                    line,
+                    cellX,
+                    lineY,
+                    cellFontSize,
+                    cellFont,
+                    textColor,
+                    textColorHex,
+                    isHeader
+                  );
+                  lineY -= cellFontSize + 3;
+                }
+
+                currentX += cell.width;
+              }
+
+              y -= rowHeight;
             }
-            y -= rowHeight;
+            y -= 10;
           }
-          y -= 10;
         } else if (block.kind === 'math') {
-          ensureSpace(20);
-          page.drawText(safeWinAnsiText(`[Formula: ${block.tex}]`, fontRegular), {
-            x: margin + 10,
-            y: y - 12,
-            size: fontSize,
-            font: fontRegular,
-            color: primaryColor
-          });
-          y -= 20;
+          // Render math as crisp high-DPI equation image (NEVER output [Formula: ...])
+          try {
+            const svgStr = renderMathToSvg(block.tex || '', block.displayMode, textColorHex);
+            const svgData = `data:image/svg+xml;utf8,${encodeURIComponent(svgStr)}`;
+            const convResult = await imageSourceToPngBytes(svgData);
+
+            if (convResult && convResult.bytes) {
+              const mathImg = await pdfDoc.embedPng(convResult.bytes);
+              const fitted = fitDimensions(
+                convResult.width,
+                convResult.height,
+                contentWidth,
+                block.displayMode ? 100 : 35
+              );
+
+              ensureSpace(fitted.height + 14);
+              const mathX = block.displayMode
+                ? margin + Math.max(0, (contentWidth - fitted.width) / 2)
+                : margin + 8;
+
+              page.drawImage(mathImg, {
+                x: mathX,
+                y: y - fitted.height - 4,
+                width: fitted.width,
+                height: fitted.height
+              });
+              y -= fitted.height + 12;
+            } else {
+              // Graceful clean math representation if image embedding unavailable
+              ensureSpace(20);
+              await drawTextLine(
+                block.tex,
+                margin + 10,
+                y - 12,
+                fontSize,
+                fontRegular,
+                primaryColor,
+                primaryColorHex,
+                false
+              );
+              y -= 20;
+            }
+          } catch (mErr) {
+            console.warn('[PDF-Vector] Math image error:', mErr);
+            ensureSpace(20);
+            await drawTextLine(
+              block.tex,
+              margin + 10,
+              y - 12,
+              fontSize,
+              fontRegular,
+              primaryColor,
+              primaryColorHex,
+              false
+            );
+            y -= 20;
+          }
         } else if (block.kind === 'image' && (block.src || block.dataUrl)) {
+          // Embed image preserving intrinsic aspect ratio without stretching
           try {
             const imgSrc = block.dataUrl || block.src;
             const convResult = await imageSourceToPngBytes(imgSrc);
@@ -544,34 +807,36 @@ export async function exportConversation(originalConversation, options = {}) {
               }
 
               if (embeddedImg) {
-                const imgDims = embeddedImg.scale(1);
-                let displayWidth = Math.min(imgDims.width, contentWidth);
-                let displayHeight = (imgDims.height / imgDims.width) * displayWidth;
-                if (displayHeight > 380) {
-                  displayHeight = 380;
-                  displayWidth = (imgDims.width / imgDims.height) * displayHeight;
-                }
+                const fitted = fitDimensions(
+                  convResult.width,
+                  convResult.height,
+                  contentWidth,
+                  380
+                );
 
-                ensureSpace(displayHeight + 15);
+                ensureSpace(fitted.height + 15);
                 page.drawImage(embeddedImg, {
-                  x: margin,
-                  y: y - displayHeight,
-                  width: displayWidth,
-                  height: displayHeight
+                  x: margin + (contentWidth - fitted.width) / 2, // Centered
+                  y: y - fitted.height,
+                  width: fitted.width,
+                  height: fitted.height
                 });
-                y -= displayHeight + 15;
+                y -= fitted.height + 15;
               }
             }
           } catch (imgErr) {
             console.warn('[PDF Exporter] Failed to embed image:', imgErr);
             ensureSpace(20);
-            page.drawText(safeWinAnsiText(`[Image: ${block.alt || 'Chat Image'}]`, fontRegular), {
-              x: margin,
-              y: y - 11,
-              size: fontSize - 1,
-              font: fontRegular,
-              color: mutedColor
-            });
+            await drawTextLine(
+              `[Image: ${block.alt || 'Chat Image'}]`,
+              margin,
+              y - 11,
+              fontSize - 1,
+              fontRegular,
+              mutedColor,
+              mutedColorHex,
+              false
+            );
             y -= 15;
           }
         } else {
@@ -581,16 +846,19 @@ export async function exportConversation(originalConversation, options = {}) {
             const lines = wrapText(raw, contentWidth, fontRegular, fontSize);
             for (const l of lines) {
               ensureSpace(fontSize + 5);
-              page.drawText(l, {
-                x: margin,
-                y: y - fontSize,
-                size: fontSize,
-                font: fontRegular,
-                color: textColor
-              });
+              await drawTextLine(
+                l,
+                margin,
+                y - fontSize,
+                fontSize,
+                fontRegular,
+                textColor,
+                textColorHex,
+                false
+              );
               y -= fontSize + 4.5;
             }
-            y -= 7; // Clean paragraph bottom margin
+            y -= 7;
           }
         }
       }
@@ -601,13 +869,16 @@ export async function exportConversation(originalConversation, options = {}) {
         const lines = wrapText(raw, contentWidth, fontRegular, fontSize);
         for (const l of lines) {
           ensureSpace(fontSize + 5);
-          page.drawText(l, {
-            x: margin,
-            y: y - fontSize,
-            size: fontSize,
-            font: fontRegular,
-            color: textColor
-          });
+          await drawTextLine(
+            l,
+            margin,
+            y - fontSize,
+            fontSize,
+            fontRegular,
+            textColor,
+            textColorHex,
+            false
+          );
           y -= fontSize + 4.5;
         }
         y -= 7;
@@ -623,13 +894,16 @@ export async function exportConversation(originalConversation, options = {}) {
     const p = pdfDoc.getPage(i);
 
     if (headerText) {
-      p.drawText(safeWinAnsiText(headerText, fontRegular), {
-        x: margin,
-        y: pageHeight - margin / 2,
-        size: 8,
-        font: fontRegular,
-        color: mutedColor
-      });
+      await drawTextLine(
+        headerText,
+        margin,
+        pageHeight - margin / 2,
+        8,
+        fontRegular,
+        mutedColor,
+        mutedColorHex,
+        false
+      );
     }
 
     const pageNumberText = `Page ${i + 1} of ${totalPages}`;
@@ -643,13 +917,16 @@ export async function exportConversation(originalConversation, options = {}) {
     });
 
     if (footerText) {
-      p.drawText(safeWinAnsiText(footerText, fontRegular), {
-        x: margin,
-        y: margin / 2,
-        size: 8,
-        font: fontRegular,
-        color: mutedColor
-      });
+      await drawTextLine(
+        footerText,
+        margin,
+        margin / 2,
+        8,
+        fontRegular,
+        mutedColor,
+        mutedColorHex,
+        false
+      );
     }
   }
 

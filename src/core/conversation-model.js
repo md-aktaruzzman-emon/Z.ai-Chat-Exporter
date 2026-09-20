@@ -10,12 +10,14 @@ export const SCHEMA_VERSION = 2;
  *
  * @typedef {Object} ParagraphBlock
  * @property {'paragraph'} kind
+ * @property {string} [text]
  * @property {string} html
  *
  * @typedef {Object} HeadingBlock
  * @property {'heading'} kind
  * @property {1|2|3|4|5|6} level
  * @property {string} text
+ * @property {string} [html]
  *
  * @typedef {Object} CodeBlock
  * @property {'code'} kind
@@ -26,6 +28,7 @@ export const SCHEMA_VERSION = 2;
  * @typedef {Object} TableBlock
  * @property {'table'} kind
  * @property {string} html
+ * @property {Array<Array<{text: string, html?: string, isHeader?: boolean, colspan?: number, rowspan?: number, align?: string}>>} [rows]
  *
  * @typedef {Object} ImageBlock
  * @property {'image'} kind
@@ -34,16 +37,21 @@ export const SCHEMA_VERSION = 2;
  * @property {string} alt
  * @property {number} [width]
  * @property {number} [height]
+ * @property {number} [aspectRatio]
+ * @property {string} [caption]
  *
  * @typedef {Object} MathBlock
  * @property {'math'} kind
  * @property {string} tex
  * @property {boolean} displayMode
+ * @property {string} [html]
+ * @property {string} [mathMl]
  *
  * @typedef {Object} ListBlock
  * @property {'list'} kind
  * @property {boolean} ordered
  * @property {string} html
+ * @property {Array<{text: string, html?: string}>} [items]
  *
  * @typedef {Object} QuoteBlock
  * @property {'quote'} kind

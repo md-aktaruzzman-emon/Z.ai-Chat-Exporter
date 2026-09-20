@@ -257,11 +257,15 @@ export function parseBlocks(element, options = {}) {
           svgStr = svgStr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
         }
         const dataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(svgStr)}`;
+        const width = parseFloat(svgEl.getAttribute('width') || '0') || undefined;
+        const height = parseFloat(svgEl.getAttribute('height') || '0') || undefined;
         blocks.push({
           kind: 'image',
           src: dataUrl,
           dataUrl,
-          alt: svgEl.getAttribute('aria-label') || 'Diagram'
+          alt: svgEl.getAttribute('aria-label') || 'Diagram',
+          width,
+          height
         });
         return;
       }
@@ -284,7 +288,12 @@ export function parseBlocks(element, options = {}) {
     // 11. Headings
     if (/^h[1-6]$/.test(tag)) {
       const level = parseInt(tag[1], 10);
-      blocks.push({ kind: 'heading', level, text: node.textContent.trim(), html: sanitizeHtml(node.innerHTML) });
+      blocks.push({
+        kind: 'heading',
+        level,
+        text: node.textContent.trim(),
+        html: sanitizeHtml(node.innerHTML)
+      });
       return;
     }
 
@@ -299,7 +308,10 @@ export function parseBlocks(element, options = {}) {
         kind: 'list',
         ordered: tag === 'ol',
         html: sanitizeHtml(node.outerHTML),
-        items: items.length > 0 ? items : [{ text: node.textContent.trim(), html: sanitizeHtml(node.innerHTML) }]
+        items:
+          items.length > 0
+            ? items
+            : [{ text: node.textContent.trim(), html: sanitizeHtml(node.innerHTML) }]
       });
       return;
     }
@@ -322,20 +334,19 @@ export function parseBlocks(element, options = {}) {
         return;
       }
 
-      // Extract inline math if present
-      const mathSpans = node.querySelectorAll('.katex, [data-tex], .math');
-      for (const m of mathSpans) {
-        let tex = '';
-        const annotation = m.querySelector('.katex-mathml annotation');
-        if (annotation && annotation.textContent.trim()) {
-          tex = annotation.textContent.trim();
-        } else if (m.getAttribute('data-tex')) {
-          tex = m.getAttribute('data-tex').trim();
-        } else {
-          tex = m.textContent.trim();
-        }
+      // Check if paragraph is purely a display math wrapper (e.g. <p>$$...$$</p> or <p><div class="katex-display">...</div></p>)
+      const displayMathEl = node.querySelector('.katex-display, .math-block');
+      if (displayMathEl && node.children.length === 1) {
+        processNode(displayMathEl);
+        return;
+      }
+
+      const pText = node.textContent.trim();
+      if (/^\$\$[\s\S]+\$\$$/.test(pText) || /^\\\[[\s\S]+\\\]$/.test(pText)) {
+        const tex = pText.replace(/^\$\$|^\\\[|\$\$$|\\\]$/g, '').trim();
         if (tex) {
-          blocks.push({ kind: 'math', tex, displayMode: false });
+          blocks.push({ kind: 'math', tex, displayMode: true });
+          return;
         }
       }
 
@@ -350,9 +361,10 @@ export function parseBlocks(element, options = {}) {
         }
       }
 
+      // Preserve paragraph as one single rich structure containing inline math (DO NOT push duplicate math block)
       blocks.push({
         kind: 'paragraph',
-        text: node.textContent.trim(),
+        text: pText,
         html: sanitizeHtml(node.outerHTML)
       });
       return;

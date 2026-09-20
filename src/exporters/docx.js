@@ -19,7 +19,9 @@ import {
 } from 'docx';
 import { generateFilename } from '../core/utils/filename.js';
 import { anonymizeConversation } from './pii.js';
-import { imageSourceToPngBytes } from '../core/utils/image.js';
+import { imageSourceToPngBytes, fitDimensions } from '../core/utils/image.js';
+import { renderMathToDocxMath } from '../core/math-renderer.js';
+import { normalizeTableRows } from '../core/table-layout.js';
 
 /**
  * Parses an HTML string into structured TextRun objects with bold, italics, code, and links preserved.
@@ -216,19 +218,32 @@ async function createBlocksDocx(msg, modelName) {
           })
         );
       } else if (block.kind === 'math') {
-        items.push(
-          new Paragraph({
-            spacing: { before: 100, after: 100 },
-            children: [
-              new TextRun({
-                text: `[Formula: ${block.tex}]`,
-                italics: true,
-                color: '4F46E5',
-                size: 22
-              })
-            ]
-          })
-        );
+        // Native Word OMML equation rendering via docx.Math
+        try {
+          const docxMathElement = renderMathToDocxMath(block.tex, block.displayMode);
+          items.push(
+            new Paragraph({
+              spacing: { before: 120, after: 120 },
+              alignment: block.displayMode ? 'center' : 'left',
+              children: [docxMathElement]
+            })
+          );
+        } catch (mErr) {
+          console.warn('[DOCX Exporter] Math OMML error, fallback to run:', mErr);
+          items.push(
+            new Paragraph({
+              spacing: { before: 100, after: 100 },
+              children: [
+                new TextRun({
+                  text: block.tex || '',
+                  italics: true,
+                  color: '4F46E5',
+                  size: 22
+                })
+              ]
+            })
+          );
+        }
       } else if (block.kind === 'thinking') {
         items.push(
           new Paragraph({
@@ -259,23 +274,7 @@ async function createBlocksDocx(msg, modelName) {
         );
       } else if (block.kind === 'table') {
         try {
-          const rawRows = block.rows;
-          let tableRows = [];
-
-          if (Array.isArray(rawRows) && rawRows.length > 0) {
-            tableRows = rawRows;
-          } else if (block.html && typeof DOMParser !== 'undefined') {
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(block.html, 'text/html');
-            const trElements = Array.from(doc.querySelectorAll('tr'));
-            tableRows = trElements.map((tr) =>
-              Array.from(tr.querySelectorAll('th, td')).map((cell) => ({
-                text: cell.textContent.trim(),
-                html: cell.innerHTML,
-                isHeader: cell.tagName.toLowerCase() === 'th'
-              }))
-            );
-          }
+          const tableRows = normalizeTableRows(block);
 
           if (tableRows.length > 0) {
             const tableBorder = {
@@ -284,11 +283,14 @@ async function createBlocksDocx(msg, modelName) {
               color: 'CBD5E1'
             };
 
-            const docxRows = tableRows.map((rowCells) => {
+            const docxRows = tableRows.map((rowCells, rIdx) => {
+              const isHeader = rIdx === 0 || rowCells.some((c) => c.isHeader);
               const cells = rowCells.map((c) => {
                 return new TableCell({
-                  shading: c.isHeader ? { fill: 'F1F5F9' } : undefined,
+                  shading: isHeader ? { fill: 'F1F5F9' } : undefined,
                   margins: { top: 100, bottom: 100, left: 140, right: 140 },
+                  columnSpan: c.colspan > 1 ? c.colspan : undefined,
+                  rowSpan: c.rowspan > 1 ? c.rowspan : undefined,
                   children: [
                     new Paragraph({
                       children: parseHtmlToTextRuns(c.html || c.text)
@@ -296,7 +298,11 @@ async function createBlocksDocx(msg, modelName) {
                   ]
                 });
               });
-              return new TableRow({ children: cells });
+              return new TableRow({
+                tableHeader: isHeader,
+                cantSplit: true,
+                children: cells
+              });
             });
 
             items.push(
@@ -325,20 +331,32 @@ async function createBlocksDocx(msg, modelName) {
           );
         }
       } else if (block.kind === 'image' && (block.src || block.dataUrl)) {
+        // Embed image with responsive aspect ratio (never hardcoded 450x300)
         try {
           const imgSrc = block.dataUrl || block.src;
           const convResult = await imageSourceToPngBytes(imgSrc);
 
           if (convResult && convResult.bytes) {
+            // Calculate proportional dimensions based on page content width (~500px in Word 1-inch margins)
+            const maxWordWidth = 520;
+            const maxWordHeight = 400;
+            const fitted = fitDimensions(
+              convResult.width || 400,
+              convResult.height || 300,
+              maxWordWidth,
+              maxWordHeight
+            );
+
             items.push(
               new Paragraph({
                 spacing: { before: 120, after: 120 },
+                alignment: 'center',
                 children: [
                   new ImageRun({
                     data: convResult.bytes.buffer,
                     transformation: {
-                      width: 450,
-                      height: 300
+                      width: fitted.width,
+                      height: fitted.height
                     }
                   })
                 ]
