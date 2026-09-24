@@ -77,6 +77,13 @@ export function isSafeUrl(url) {
   ) {
     return false;
   }
+  // data: URLs are only safe for non-executable media types (XSS hardening:
+  // data:text/html and data:image/svg+xml can execute script when navigated to)
+  if (trimmed.startsWith('data:')) {
+    return /^(data:image\/(png|jpe?g|gif|webp|bmp|x-icon|svg\+xml);|data:video\/|data:audio\/|data:font\/)/.test(
+      trimmed
+    );
+  }
   if (
     trimmed.startsWith('http://') ||
     trimmed.startsWith('https://') ||

@@ -67,10 +67,59 @@ export function anonymizeConversation(conversation) {
           if (block.code) block.code = anonymizePiiText(block.code);
           if (block.snippet) block.snippet = anonymizePiiText(block.snippet);
           if (block.title) block.title = anonymizePiiText(block.title);
+          if (block.query) block.query = anonymizePiiText(block.query);
+          if (block.inputJson) block.inputJson = anonymizePiiText(block.inputJson);
+          if (block.outputSummary) block.outputSummary = anonymizePiiText(block.outputSummary);
+          // URLs: strip credentials/tokens from query strings (emails, api keys, tokens)
+          if (block.url) block.url = redactUrlPii(block.url);
+          // Table cells (rows contain {text, html} cell objects)
+          if (Array.isArray(block.rows)) {
+            for (const row of block.rows) {
+              for (const cell of row) {
+                if (cell?.text) cell.text = anonymizePiiText(cell.text);
+                if (cell?.html) cell.html = anonymizePiiText(cell.html);
+              }
+            }
+          }
+          // Search result items ({title, url, snippet})
+          if (Array.isArray(block.results)) {
+            for (const item of block.results) {
+              if (item?.title) item.title = anonymizePiiText(item.title);
+              if (item?.snippet) item.snippet = anonymizePiiText(item.snippet);
+              if (item?.url) item.url = redactUrlPii(item.url);
+            }
+          }
+          // List items ({text, html})
+          if (Array.isArray(block.items)) {
+            for (const item of block.items) {
+              if (item?.text) item.text = anonymizePiiText(item.text);
+              if (item?.html) item.html = anonymizePiiText(item.html);
+            }
+          }
         }
       }
     }
   }
 
   return cloned;
+}
+
+/**
+ * Redacts PII from the query-string portion of a URL while preserving the
+ * path (so links stay functional). Only the query/search part is scrubbed.
+ * @param {string} url
+ * @returns {string}
+ */
+export function redactUrlPii(url) {
+  if (!url || typeof url !== 'string') return url;
+  // Redact emails and long secrets appearing in query strings / fragments
+  return url
+    .replace(
+      /([?&][^=]*=)([^&\s]*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,7}[^&\s]*)/g,
+      '$1[REDACTED]'
+    )
+    .replace(
+      /([?&](?:token|api_key|apikey|key|access_token|auth|secret|password|credential)s?=)[^&\s]+/gi,
+      '$1[REDACTED]'
+    );
 }

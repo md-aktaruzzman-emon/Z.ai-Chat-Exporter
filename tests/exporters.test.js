@@ -17,7 +17,7 @@ import { sanitizeHtml, isSafeUrl } from '../src/core/sanitize.js';
 import { generateFilename } from '../src/core/utils/filename.js';
 
 // Exporters imports
-import { anonymizePiiText, anonymizeConversation } from '../src/exporters/pii.js';
+import { anonymizePiiText, anonymizeConversation, redactUrlPii } from '../src/exporters/pii.js';
 import * as markdownExporter from '../src/exporters/markdown.js';
 import * as txtExporter from '../src/exporters/txt.js';
 import * as jsonExporter from '../src/exporters/json.js';
@@ -83,6 +83,18 @@ describe('2. Sanitization Engine', () => {
     expect(isSafeUrl('https://chat.z.ai')).toBe(true);
     expect(isSafeUrl('data:image/png;base64,123')).toBe(true);
   });
+
+  it('blocks executable data: URLs (text/html) while allowing media data URIs', () => {
+    expect(isSafeUrl('data:text/html,<script>alert(1)</script>')).toBe(false);
+    expect(isSafeUrl('data:application/javascript,alert(1)')).toBe(false);
+    expect(isSafeUrl('data:image/jpeg;base64,abc')).toBe(true);
+    expect(isSafeUrl('data:video/mp4;base64,abc')).toBe(true);
+  });
+
+  it('sanitizes data:text/html src/href attributes out of exported HTML', () => {
+    const clean = sanitizeHtml('<a href="data:text/html,<b>x</b>">click</a>');
+    expect(clean).not.toContain('href');
+  });
 });
 
 describe('3. Filename Engine', () => {
@@ -141,6 +153,75 @@ describe('4. PII Anonymizer', () => {
     const scrubbed = anonymizeConversation(original);
     expect(scrubbed.title).toContain('[EMAIL REDACTED]');
     expect(original.title).toBe('Private info: secret@corp.com'); // Untouched
+  });
+
+  it('anonymizes PII inside table cells, lists, tool calls, and search results', () => {
+    const conv = createEmptyConversation();
+    conv.messages.push({
+      index: 0,
+      role: 'assistant',
+      text: '',
+      html: '',
+      blocks: [
+        {
+          kind: 'table',
+          rows: [
+            [
+              { text: 'Owner', html: '<p>Owner</p>', isHeader: true, colspan: 1, rowspan: 1 },
+              {
+                text: 'bob@corp.com',
+                html: '<p>bob@corp.com</p>',
+                isHeader: false,
+                colspan: 1,
+                rowspan: 1
+              }
+            ]
+          ]
+        },
+        {
+          kind: 'list',
+          ordered: false,
+          items: [{ text: 'Call 555-0199 ext 32', html: '<p>Call 555-0199</p>' }]
+        },
+        {
+          kind: 'toolCall',
+          tool: 'fetch',
+          inputJson: '{"token":"sk-abcdefghijklmnopqrstuvwx"}',
+          outputSummary: 'OK for admin@corp.com'
+        },
+        {
+          kind: 'searchResult',
+          query: 'email me at eve@corp.com',
+          results: [
+            { title: 'Page', url: 'https://ex.com/u?user=a@b.com&token=abcdef123456', snippet: 'x' }
+          ]
+        },
+        {
+          kind: 'citation',
+          title: 'Ref: a@b.com',
+          url: 'https://ex.com/p?api_key=sk-secret123456789'
+        }
+      ]
+    });
+
+    const scrubbed = anonymizeConversation(conv);
+    const blocks = scrubbed.messages[0].blocks;
+    expect(blocks[0].rows[0][1].text).toContain('[EMAIL REDACTED]');
+    expect(blocks[1].items[0].text).toContain('[PHONE REDACTED]');
+    expect(blocks[2].outputSummary).toContain('[EMAIL REDACTED]');
+    expect(blocks[3].query).toContain('[EMAIL REDACTED]');
+    expect(blocks[3].results[0].url).toContain('[REDACTED]');
+    expect(blocks[4].url).toContain('[REDACTED]');
+    expect(blocks[4].url).toContain('https://ex.com/p'); // path preserved
+    // Original untouched (R9)
+    expect(conv.messages[0].blocks[0].rows[0][1].text).toBe('bob@corp.com');
+  });
+
+  it('redactsUrlPii strips secrets from query strings but keeps the path', () => {
+    expect(redactUrlPii('https://ex.com/p?api_key=sk-123456&page=2')).toBe(
+      'https://ex.com/p?api_key=[REDACTED]&page=2'
+    );
+    expect(redactUrlPii('https://ex.com/docs/guide?u=x')).toBe('https://ex.com/docs/guide?u=x');
   });
 });
 
@@ -214,6 +295,43 @@ describe('5. Scraper Fixtures Integration', () => {
     expect(tableBlocks.length).toBe(1);
     expect(tableBlocks[0].html).toContain('<table');
   });
+
+  it('splits nested lists without double-counting parent item text', () => {
+    const container = document.createElement('div');
+    container.innerHTML = `
+      <div class="assistant-message">
+        <ul>
+          <li>Top level one</li>
+          <li>Top level two
+            <ul>
+              <li>Nested alpha</li>
+              <li>Nested beta</li>
+            </ul>
+          </li>
+        </ul>
+      </div>`;
+
+    const blocks = parseBlocks(container.querySelector('.assistant-message'));
+    const listBlocks = blocks.filter((b) => b.kind === 'list');
+
+    // Outer list + one nested list block (nested lists become their own blocks)
+    expect(listBlocks.length).toBe(2);
+    const outerItems = listBlocks[0].items;
+    expect(outerItems.length).toBe(2);
+    // Parent item text must NOT include nested list text
+    expect(outerItems[0].text).toBe('Top level one');
+    expect(outerItems[1].text).toBe('Top level two');
+    expect(outerItems[1].text).not.toContain('Nested');
+    // Nested items emitted as their own block
+    expect(nestedItems(nestedBlocks(listBlocks))).toEqual(['Nested alpha', 'Nested beta']);
+  });
+
+  function nestedBlocks(listBlocks) {
+    return listBlocks.slice(1).filter((b) => b.kind === 'list');
+  }
+  function nestedItems(blocks) {
+    return blocks.flatMap((b) => b.items.map((i) => i.text));
+  }
 
   it('parses local data URL images from image.html fixture', () => {
     const fixturePath = path.resolve(__dirname, 'fixtures/image.html');

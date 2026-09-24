@@ -299,11 +299,17 @@ export function parseBlocks(element, options = {}) {
 
     // 12. List (UL, OL) with individual items
     if (tag === 'ul' || tag === 'ol') {
-      const lis = Array.from(node.querySelectorAll(':scope > li, li'));
-      const items = lis.map((li) => ({
-        text: li.textContent.trim(),
-        html: sanitizeHtml(li.innerHTML)
-      }));
+      const lis = Array.from(node.querySelectorAll(':scope > li'));
+      const items = lis.map((li) => {
+        // Exclude nested list text from this item's text (child lists are
+        // emitted as their own blocks below), preventing double-counting.
+        const clone = li.cloneNode(true);
+        clone.querySelectorAll('ul, ol').forEach((n) => n.remove());
+        return {
+          text: clone.textContent.trim(),
+          html: sanitizeHtml(li.innerHTML)
+        };
+      });
       blocks.push({
         kind: 'list',
         ordered: tag === 'ol',
@@ -313,6 +319,12 @@ export function parseBlocks(element, options = {}) {
             ? items
             : [{ text: node.textContent.trim(), html: sanitizeHtml(node.innerHTML) }]
       });
+      // Emit nested lists as their own blocks AFTER the parent list block
+      for (const li of lis) {
+        for (const nested of li.querySelectorAll(':scope > ul, :scope > ol')) {
+          processNode(nested);
+        }
+      }
       return;
     }
 
