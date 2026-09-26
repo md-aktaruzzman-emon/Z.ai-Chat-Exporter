@@ -103,6 +103,51 @@ export function classifyRole(el, index = 0) {
   // 6. Natural chat turn alternation fallback
   return index % 2 === 0 ? 'user' : 'assistant';
 }
+ 
+/**
+ * Detects whether an element represents an uploaded file / attachment in Z.ai.
+ * @param {Element} node
+ * @returns {import('../core/conversation-model.js').AttachmentBlock|null}
+ */
+export function extractAttachmentBlock(node) {
+  if (!node || node.nodeType !== 1) return null;
+
+  const isAttachmentClass =
+    node.matches?.(
+      '[class*="attachment" i], [class*="file-item" i], [class*="file-card" i], [class*="uploaded-file" i], [data-file-name], [class*="file_" i]'
+    ) ||
+    node.getAttribute?.('data-testid')?.includes('attachment') ||
+    node.getAttribute?.('data-testid')?.includes('file');
+
+  const text = node.textContent?.trim() || '';
+  const fileExtMatch = text.match(
+    /\b([\w\s\-_().+]+\.(pdf|md|docx|doc|txt|png|jpg|jpeg|zip|py|js|json|csv))\b/i
+  );
+
+  if (
+    isAttachmentClass ||
+    (fileExtMatch &&
+      (text.includes('MB') || text.includes('KB') || text.includes('PDF') || text.includes('File')) &&
+      text.length < 250)
+  ) {
+    const fileName = fileExtMatch ? fileExtMatch[1].trim() : text.split('\n')[0].trim();
+    const extMatch = fileName.match(/\.([a-z0-9]+)$/i);
+    const ext = extMatch ? extMatch[1].toUpperCase() : 'FILE';
+
+    const sizeMatch = text.match(/(\d+(?:\.\d+)?\s*(?:MB|KB|GB|B|bytes))\b/i);
+    const sizeStr = sizeMatch ? sizeMatch[1].toUpperCase() : '';
+
+    return {
+      kind: 'attachment',
+      name: fileName,
+      ext,
+      size: sizeStr,
+      icon: ext === 'PDF' ? '📄' : ext === 'MD' ? '📝' : '📎'
+    };
+  }
+
+  return null;
+}
 
 /**
  * Extracts blocks from a message element in DOM order, supporting all 14 block kinds.
@@ -164,18 +209,43 @@ export function parseBlocks(element, options = {}) {
       let textContent = '';
       for (const n of inlineBuffer) {
         wrapper.appendChild(n.cloneNode(true));
-        textContent += n.nodeType === 3 ? n.textContent : n.textContent || '';
+        const raw = n.nodeType === 3 ? n.textContent : n.textContent || '';
+        if (raw) {
+          if (
+            textContent.length > 0 &&
+            !/\s$/.test(textContent) &&
+            !/^\s/.test(raw) &&
+            !/^[,.:;!?')\]}]/.test(raw)
+          ) {
+            textContent += ' ';
+          }
+          textContent += raw;
+        }
       }
 
       const trimmedText = textContent.trim();
       const hasContent = trimmedText.length > 0 || wrapper.querySelector('img, svg, canvas, br');
 
       if (hasContent) {
-        blocks.push({
-          kind: 'paragraph',
-          text: trimmedText,
-          html: sanitizeHtml(wrapper.innerHTML)
-        });
+        if (trimmedText.includes('\n\n')) {
+          const parts = trimmedText.split(/\n\s*\n/);
+          for (const p of parts) {
+            const pt = p.trim();
+            if (pt) {
+              blocks.push({
+                kind: 'paragraph',
+                text: pt,
+                html: sanitizeHtml(pt.replace(/\n/g, '<br/>'))
+              });
+            }
+          }
+        } else {
+          blocks.push({
+            kind: 'paragraph',
+            text: trimmedText,
+            html: sanitizeHtml(wrapper.innerHTML)
+          });
+        }
       }
       inlineBuffer = [];
     }
@@ -188,6 +258,14 @@ export function parseBlocks(element, options = {}) {
         }
       } else if (node.nodeType === 1) {
         const tag = node.tagName.toLowerCase();
+
+        // 0. Attachment Card
+        const attBlock = extractAttachmentBlock(node);
+        if (attBlock) {
+          flushInlineBuffer();
+          blocks.push(attBlock);
+          continue;
+        }
 
         // 1. Thinking / Reasoning
         if (node.matches?.('[class*="think"], details[class*="reason"], .reasoning-block')) {

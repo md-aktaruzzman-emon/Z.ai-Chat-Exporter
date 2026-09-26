@@ -1,8 +1,11 @@
 /**
  * @file pdf-vector.js
  * Selectable, searchable, deterministic Vector PDF generator using pdf-lib.
- * Built with a Paged Document Layout Engine to accurately measure block heights
- * and eliminate text overlapping, line clipping, and layout distortion.
+ * Matches the publication-quality 'extrention z' document styling:
+ * - Rounded mint-green user message cards with '👤 You'
+ * - File attachment cards with icons and metadata badges
+ * - Running headers and footers with divider lines
+ * - Dynamic block measurement and collision-free typography
  */
 
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
@@ -320,11 +323,11 @@ function createUnicodeTextSvgDataUrl(text, fontSize, colorHex, isBold, maxWidth)
     .replace(/"/g, '&quot;');
 
   const height = Math.round(fontSize * 1.5);
-  const width = Math.min(Math.max(text.length * fontSize * 0.7, 50), maxWidth);
+  const width = Math.min(Math.max(text.length * fontSize * 0.75, 60), maxWidth);
 
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-  <text x="0" y="${fontSize * 1.1}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Bengali', Kalpurush, sans-serif" font-size="${fontSize}px" font-weight="${isBold ? 'bold' : 'normal'}" fill="${colorHex}">${safeText}</text>
+  <text x="0" y="${fontSize * 1.15}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Bengali', Kalpurush, sans-serif" font-size="${fontSize}px" font-weight="${isBold ? 'bold' : 'normal'}" fill="${colorHex}">${safeText}</text>
 </svg>`.trim();
 
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
@@ -394,12 +397,14 @@ class PdfLayoutEngine {
     }
     this.pages.push(page);
     this.currentPage = page;
-    this.cursorY = this.pageHeight - this.margin;
+    // Leave room below top running header line (header line is at pageHeight - 28)
+    this.cursorY = this.pageHeight - this.margin - 12;
     return page;
   }
 
   get availableHeight() {
-    return this.cursorY - this.margin;
+    // Bottom limit is above bottom footer divider line (footer line is at margin + 14)
+    return this.cursorY - (this.margin + 20);
   }
 
   hasSpace(height) {
@@ -426,11 +431,12 @@ class PdfLayoutEngine {
             convResult.width,
             convResult.height,
             this.contentWidth,
-            size * 1.8
+            size * 1.5
           );
+          // Baseline alignment: align SVG text baseline with standard font baseline curY
           this.currentPage.drawImage(img, {
             x,
-            y: curY - fitted.height + 2,
+            y: curY - fitted.height * 0.35,
             width: fitted.width,
             height: fitted.height
           });
@@ -453,24 +459,26 @@ class PdfLayoutEngine {
 
   // --- Block Measurements ---
 
-  measureHeading(block) {
+  measureHeading(block, offset = 0) {
     const hSize =
       block.level === 1 ? this.fontSize + 4 : block.level === 2 ? this.fontSize + 2.5 : this.fontSize + 1.5;
     const hText = block.text || htmlToText(block.html) || '';
-    const lines = wrapText(hText, this.contentWidth, this.fontBold, hSize);
+    const maxW = this.contentWidth - offset;
+    const lines = wrapText(hText, maxW, this.fontBold, hSize);
     const lineHeight = hSize + 4;
     const spaceBefore = 10;
     const spaceAfter = 6;
     const contentHeight = lines.length * lineHeight;
     const totalHeight = spaceBefore + contentHeight + spaceAfter;
-    const keepWithNextMin = 35; // keep heading together with following paragraph lines
+    const keepWithNextMin = 35;
     return { kind: 'heading', hSize, lines, lineHeight, spaceBefore, spaceAfter, contentHeight, totalHeight, keepWithNextMin };
   }
 
-  measureParagraph(rawText) {
+  measureParagraph(rawText, offset = 0) {
     const text = rawText || '';
     if (!text.trim()) return { kind: 'paragraph', lines: [], totalHeight: 0 };
-    const lines = wrapText(text, this.contentWidth, this.fontRegular, this.fontSize);
+    const maxW = this.contentWidth - offset;
+    const lines = wrapText(text, maxW, this.fontRegular, this.fontSize);
     const lineHeight = this.fontSize + 4.5;
     const spaceAfter = 7;
     const contentHeight = lines.length * lineHeight;
@@ -505,8 +513,8 @@ class PdfLayoutEngine {
         const depth = item.depth || 0;
         const isOrd = item.ordered !== undefined ? item.ordered : block.ordered;
         const itemIdx = item.index !== undefined ? item.index : idx + 1;
-        const bullet = isOrd ? `${itemIdx}. ` : '* ';
-        const bulletWidth = this.fontBold.widthOfTextAtSize(bullet, this.fontSize);
+        const bullet = isOrd ? `${itemIdx}. ` : '• ';
+        const bulletWidth = this.fontBold.widthOfTextAtSize(safeWinAnsiText(bullet, this.fontBold), this.fontSize);
         const text = item.text || htmlToText(item.html);
         const indentX = this.margin + 8 + depth * 16;
         const availW = this.contentWidth - (8 + depth * 16) - bulletWidth - 4;
@@ -571,17 +579,176 @@ class PdfLayoutEngine {
     return { kind: 'table', colWidths, measuredRows, totalHeight };
   }
 
-  // --- Block Renderers ---
+  // --- extrention z Message Cards & Renderers ---
 
-  async renderHeading(block) {
-    const m = this.measureHeading(block);
+  measureUserCard(msg) {
+    const cardPadding = 10;
+    const headerHeight = 16;
+    let contentH = 0;
+    const measuredBlocks = [];
+
+    const blocks =
+      Array.isArray(msg.blocks) && msg.blocks.length > 0
+        ? msg.blocks
+        : [{ kind: 'paragraph', text: msg.text || '' }];
+
+    for (const b of blocks) {
+      if (b.kind === 'attachment') {
+        const h = 40;
+        contentH += h;
+        measuredBlocks.push({ block: b, height: h });
+      } else if (b.kind === 'heading') {
+        const m = this.measureHeading(b, 24);
+        contentH += m.totalHeight;
+        measuredBlocks.push({ block: b, measured: m, height: m.totalHeight });
+      } else {
+        const text = b.text || htmlToText(b.html);
+        const m = this.measureParagraph(text, 24);
+        contentH += m.totalHeight;
+        measuredBlocks.push({ block: b, measured: m, height: m.totalHeight });
+      }
+    }
+
+    const totalHeight = cardPadding * 2 + headerHeight + contentH;
+    return { totalHeight, cardPadding, headerHeight, measuredBlocks };
+  }
+
+  async renderUserCard(msg) {
+    const m = this.measureUserCard(msg);
+    const pageContentH = this.pageHeight - this.margin * 2 - 30;
+
+    if (m.totalHeight <= this.availableHeight) {
+      const cardTop = this.cursorY;
+      const cardH = m.totalHeight;
+
+      // Draw soft mint-green bubble card (extrention z style)
+      this.currentPage.drawRectangle({
+        x: this.margin,
+        y: cardTop - cardH,
+        width: this.contentWidth,
+        height: cardH,
+        color: rgb(0.941, 0.992, 0.957), // #f0fdf4
+        borderColor: rgb(0.525, 0.937, 0.675), // #86efac
+        borderWidth: 1
+      });
+
+      this.cursorY -= m.cardPadding;
+
+      // Speaker Header: 👤 You
+      await this.drawTextLine(
+        'You',
+        this.margin + 12,
+        this.cursorY - 11,
+        10.5,
+        this.fontBold,
+        rgb(0.02, 0.588, 0.412), // #059669
+        '#059669',
+        true
+      );
+      this.cursorY -= m.headerHeight;
+
+      // Render inner content inside card
+      for (const item of m.measuredBlocks) {
+        if (item.block.kind === 'attachment') {
+          await this.renderAttachmentCard(item.block, true);
+        } else if (item.block.kind === 'heading') {
+          await this.renderHeading(item.block, 12);
+        } else {
+          const text = item.block.text || htmlToText(item.block.html);
+          await this.renderParagraphText(text, 12);
+        }
+      }
+
+      this.cursorY = cardTop - cardH - 18; // 18pt gap after user card
+    } else if (m.totalHeight <= pageContentH) {
+      this.addPage();
+      await this.renderUserCard(msg);
+    } else {
+      // Long user prompt: header + plain render
+      this.ensureSpace(35);
+      await this.drawTextLine(
+        'You',
+        this.margin,
+        this.cursorY - 12,
+        11,
+        this.fontBold,
+        this.userRoleColor,
+        '#059669',
+        true
+      );
+      this.cursorY -= 20;
+
+      for (const item of m.measuredBlocks) {
+        if (item.block.kind === 'attachment') {
+          await this.renderAttachmentCard(item.block, false);
+        } else if (item.block.kind === 'heading') {
+          await this.renderHeading(item.block);
+        } else {
+          const text = item.block.text || htmlToText(item.block.html);
+          await this.renderParagraphText(text);
+        }
+      }
+      this.cursorY -= 14;
+    }
+  }
+
+  async renderAttachmentCard(att, inCard = true) {
+    const cardW = inCard ? this.contentWidth - 24 : this.contentWidth;
+    const cardX = inCard ? this.margin + 12 : this.margin;
+    const cardH = 34;
+
+    this.ensureSpace(cardH + 6);
+    const boxTop = this.cursorY;
+
+    // Inner white card box with subtle border
+    this.currentPage.drawRectangle({
+      x: cardX,
+      y: boxTop - cardH,
+      width: cardW,
+      height: cardH,
+      color: rgb(1, 1, 1),
+      borderColor: rgb(0.796, 0.835, 0.882), // #cbd5e1
+      borderWidth: 0.8
+    });
+
+    // Filename in bold 9.5pt
+    const name = (att.name || 'Attached File').substring(0, 65);
+    await this.drawTextLine(
+      name,
+      cardX + 12,
+      boxTop - 13,
+      9.5,
+      this.fontBold,
+      rgb(0.06, 0.09, 0.16),
+      '#0f172a',
+      true
+    );
+
+    // Metadata pill: [PDF  1.4 MB]
+    const metaStr = `${att.ext || 'FILE'}${att.size ? '  ' + att.size : ''}`;
+    await this.drawTextLine(
+      metaStr,
+      cardX + 12,
+      boxTop - 26,
+      8,
+      this.fontRegular,
+      this.mutedColor,
+      this.mutedColorHex,
+      false
+    );
+
+    this.cursorY -= cardH + 8;
+  }
+
+  async renderHeading(block, offset = 0) {
+    const m = this.measureHeading(block, offset);
     this.ensureSpace(m.totalHeight + m.keepWithNextMin);
 
     this.cursorY -= m.spaceBefore;
     for (const l of m.lines) {
       await this.drawTextLine(
         l,
-        this.margin,
+        this.margin + offset,
         this.cursorY - m.hSize,
         m.hSize,
         this.fontBold,
@@ -594,15 +761,15 @@ class PdfLayoutEngine {
     this.cursorY -= m.spaceAfter;
   }
 
-  async renderParagraphText(text) {
-    const m = this.measureParagraph(text);
+  async renderParagraphText(text, offset = 0) {
+    const m = this.measureParagraph(text, offset);
     if (m.lines.length === 0) return;
 
     if (this.hasSpace(m.totalHeight)) {
       for (const l of m.lines) {
         await this.drawTextLine(
           l,
-          this.margin,
+          this.margin + offset,
           this.cursorY - this.fontSize,
           this.fontSize,
           this.fontRegular,
@@ -623,7 +790,7 @@ class PdfLayoutEngine {
         }
         await this.drawTextLine(
           l,
-          this.margin,
+          this.margin + offset,
           this.cursorY - this.fontSize,
           this.fontSize,
           this.fontRegular,
@@ -639,24 +806,36 @@ class PdfLayoutEngine {
 
   async renderCode(block) {
     const m = this.measureCode(block);
-    const pageContentHeight = this.pageHeight - this.margin * 2;
+    const pageContentHeight = this.pageHeight - this.margin * 2 - 30;
 
     if (m.totalHeight <= this.availableHeight) {
       const boxTop = this.cursorY;
       const boxH = m.totalHeight - m.spaceAfter;
+
       this.currentPage.drawRectangle({
         x: this.margin,
         y: boxTop - boxH,
         width: this.contentWidth,
         height: boxH,
-        color: this.codeBgColor
+        color: this.codeBgColor,
+        borderColor: this.borderColor,
+        borderWidth: 0.8
+      });
+
+      // Left accent bar
+      this.currentPage.drawRectangle({
+        x: this.margin,
+        y: boxTop - boxH,
+        width: 3,
+        height: boxH,
+        color: this.primaryColor
       });
 
       this.cursorY -= m.paddingTopBottom;
       for (const line of m.codeLines) {
         await this.drawTextLine(
           line,
-          this.margin + 8,
+          this.margin + 10,
           this.cursorY - 9,
           8.5,
           this.fontMono,
@@ -687,14 +866,24 @@ class PdfLayoutEngine {
           y: boxTop - chunkH,
           width: this.contentWidth,
           height: chunkH,
-          color: this.codeBgColor
+          color: this.codeBgColor,
+          borderColor: this.borderColor,
+          borderWidth: 0.8
+        });
+
+        this.currentPage.drawRectangle({
+          x: this.margin,
+          y: boxTop - chunkH,
+          width: 3,
+          height: chunkH,
+          color: this.primaryColor
         });
 
         this.cursorY -= m.paddingTopBottom;
         for (const line of chunk) {
           await this.drawTextLine(
             line,
-            this.margin + 8,
+            this.margin + 10,
             this.cursorY - 9,
             8.5,
             this.fontMono,
@@ -1004,10 +1193,10 @@ export async function exportConversation(originalConversation, options = {}) {
   const mutedColorHex = isDark ? '#9ca3af' : '#64748b';
   const primaryColor = isDark ? rgb(0.55, 0.5, 0.95) : rgb(0.31, 0.27, 0.9);
   const primaryColorHex = isDark ? '#818cf8' : '#4f46e5';
-  const userRoleColor = isDark ? rgb(0.55, 0.5, 0.95) : rgb(0.31, 0.27, 0.9);
+  const userRoleColor = rgb(0.02, 0.588, 0.412); // #059669
   const assistantRoleColor = isDark ? rgb(0.3, 0.8, 0.6) : rgb(0.05, 0.6, 0.4);
-  const codeBgColor = isDark ? rgb(0.15, 0.15, 0.2) : rgb(0.95, 0.96, 0.98);
-  const tableHeaderBg = isDark ? rgb(0.2, 0.2, 0.25) : rgb(0.93, 0.94, 0.96);
+  const codeBgColor = isDark ? rgb(0.15, 0.15, 0.2) : rgb(0.97, 0.98, 0.99);
+  const tableHeaderBg = isDark ? rgb(0.2, 0.2, 0.25) : rgb(0.94, 0.96, 0.98);
   const borderColor = isDark ? rgb(0.28, 0.28, 0.35) : rgb(0.85, 0.88, 0.92);
 
   const [pageWidth, pageHeight] = PAGE_FORMATS[pageFormat.toLowerCase()] || PAGE_FORMATS.a4;
@@ -1037,157 +1226,115 @@ export async function exportConversation(originalConversation, options = {}) {
     fontSize
   });
 
-  // Draw Title
-  layoutEngine.ensureSpace(45);
-  await layoutEngine.drawTextLine(
-    conv.title || 'Z.ai Conversation',
-    margin,
-    layoutEngine.cursorY - 22,
-    18,
-    fontBold,
-    textColor,
-    textColorHex,
-    true
-  );
-  layoutEngine.cursorY -= 32;
-
-  // Metadata Header
-  const dateStr = new Date(conv.createdAt).toLocaleString();
-  await layoutEngine.drawTextLine(
-    `Model: ${conv.model}  |  Date: ${dateStr}`,
-    margin,
-    layoutEngine.cursorY - 10,
-    9,
-    fontRegular,
-    mutedColor,
-    mutedColorHex,
-    false
-  );
-  layoutEngine.cursorY -= 22;
-
-  // Horizontal divider
-  layoutEngine.currentPage.drawLine({
-    start: { x: margin, y: layoutEngine.cursorY },
-    end: { x: pageWidth - margin, y: layoutEngine.cursorY },
-    thickness: 1,
-    color: borderColor
-  });
-  layoutEngine.cursorY -= 24;
-
-  // Table of Contents if enabled
-  if (includeToc && Array.isArray(conv.messages) && conv.messages.length > 0) {
-    layoutEngine.ensureSpace(40);
-    layoutEngine.currentPage.drawText('Table of Contents', {
-      x: margin,
-      y: layoutEngine.cursorY - 12,
-      size: 13,
-      font: fontBold,
-      color: primaryColor
-    });
-    layoutEngine.cursorY -= 22;
-
-    for (let i = 0; i < Math.min(conv.messages.length, 25); i++) {
-      const msg = conv.messages[i];
-      const snippet = (msg.text || '').substring(0, 45).replace(/\n/g, ' ');
-      layoutEngine.ensureSpace(14);
-      await layoutEngine.drawTextLine(
-        `#${i + 1} [${msg.role}]: ${snippet}...`,
-        margin + 10,
-        layoutEngine.cursorY - 10,
-        8.5,
-        fontRegular,
-        mutedColor,
-        mutedColorHex,
-        false
-      );
-      layoutEngine.cursorY -= 14;
-    }
-    layoutEngine.cursorY -= 16;
-  }
-
   // Render Messages
   for (const msg of conv.messages) {
     const isUser = msg.role === 'user';
-    const roleLabel = isUser ? 'You' : conv.model || 'Z.ai Assistant';
 
-    // Keep speaker header together with first block content
-    layoutEngine.ensureSpace(56);
-
-    // Speaker Header
-    layoutEngine.currentPage.drawText(safeWinAnsiText(roleLabel, fontBold), {
-      x: margin,
-      y: layoutEngine.cursorY - 12,
-      size: fontSize + 2,
-      font: fontBold,
-      color: isUser ? userRoleColor : assistantRoleColor
-    });
-    layoutEngine.cursorY -= 22;
-
-    if (Array.isArray(msg.blocks) && msg.blocks.length > 0) {
-      for (const block of msg.blocks) {
-        if (block.kind === 'heading') {
-          await layoutEngine.renderHeading(block);
-        } else if (block.kind === 'list') {
-          await layoutEngine.renderList(block);
-        } else if (block.kind === 'quote') {
-          await layoutEngine.renderQuote(block);
-        } else if (block.kind === 'code') {
-          await layoutEngine.renderCode(block);
-        } else if (block.kind === 'table') {
-          await layoutEngine.renderTable(block);
-        } else if (block.kind === 'math') {
-          await layoutEngine.renderMath(block);
-        } else if (block.kind === 'image' && (block.src || block.dataUrl)) {
-          await layoutEngine.renderImage(block);
-        } else {
-          const raw = block.text || htmlToText(block.html);
-          await layoutEngine.renderParagraphText(raw);
-        }
-      }
+    if (isUser) {
+      // User message rendered in extrention z styled mint-green card with attachments
+      await layoutEngine.renderUserCard(msg);
     } else {
-      const raw = msg.text || '';
-      await layoutEngine.renderParagraphText(raw);
-    }
+      // Assistant message: Speaker header with model name
+      const roleLabel = conv.model || 'Z.ai Assistant';
+      layoutEngine.ensureSpace(45);
 
-    layoutEngine.cursorY -= 14; // Gap between speaker messages
+      await layoutEngine.drawTextLine(
+        roleLabel,
+        margin,
+        layoutEngine.cursorY - 12,
+        fontSize + 2,
+        fontBold,
+        assistantRoleColor,
+        '#059669',
+        true
+      );
+      layoutEngine.cursorY -= 22;
+
+      if (Array.isArray(msg.blocks) && msg.blocks.length > 0) {
+        for (const block of msg.blocks) {
+          if (block.kind === 'heading') {
+            await layoutEngine.renderHeading(block);
+          } else if (block.kind === 'list') {
+            await layoutEngine.renderList(block);
+          } else if (block.kind === 'quote') {
+            await layoutEngine.renderQuote(block);
+          } else if (block.kind === 'code') {
+            await layoutEngine.renderCode(block);
+          } else if (block.kind === 'table') {
+            await layoutEngine.renderTable(block);
+          } else if (block.kind === 'math') {
+            await layoutEngine.renderMath(block);
+          } else if (block.kind === 'attachment') {
+            await layoutEngine.renderAttachmentCard(block, false);
+          } else if (block.kind === 'image' && (block.src || block.dataUrl)) {
+            await layoutEngine.renderImage(block);
+          } else {
+            const raw = block.text || htmlToText(block.html);
+            await layoutEngine.renderParagraphText(raw);
+          }
+        }
+      } else {
+        const raw = msg.text || '';
+        await layoutEngine.renderParagraphText(raw);
+      }
+
+      layoutEngine.cursorY -= 16; // Gap between assistant and next message
+    }
   }
 
-  // Draw headers, footers, and page numbers across all pages
+  // Draw running header, footer, and dividers across all pages (extrention z style)
   const totalPages = pdfDoc.getPageCount();
   for (let i = 0; i < totalPages; i++) {
     const p = pdfDoc.getPage(i);
 
-    if (headerText) {
-      const safeHeader = safeWinAnsiText(headerText, fontRegular);
-      p.drawText(safeHeader, {
-        x: margin,
-        y: pageHeight - margin / 2,
-        size: 8,
-        font: fontRegular,
-        color: mutedColor
-      });
-    }
-
-    const pageNumberText = `Page ${i + 1} of ${totalPages}`;
-    const pageNumWidth = fontRegular.widthOfTextAtSize(pageNumberText, 8);
-    p.drawText(pageNumberText, {
-      x: pageWidth - margin - pageNumWidth,
-      y: margin / 2,
-      size: 8,
+    // Running Header
+    const headerTitle = headerText || conv.title || 'extrention z';
+    p.drawRectangle({
+      x: margin,
+      y: pageHeight - 24,
+      width: 7,
+      height: 7,
+      color: rgb(0.65, 0.7, 0.75)
+    });
+    p.drawText(safeWinAnsiText(headerTitle, fontRegular), {
+      x: margin + 12,
+      y: pageHeight - 23,
+      size: 8.5,
       font: fontRegular,
       color: mutedColor
     });
 
-    if (footerText) {
-      const safeFooter = safeWinAnsiText(footerText, fontRegular);
-      p.drawText(safeFooter, {
-        x: margin,
-        y: margin / 2,
-        size: 8,
-        font: fontRegular,
-        color: mutedColor
-      });
-    }
+    // Top Divider Line
+    p.drawLine({
+      start: { x: margin, y: pageHeight - 28 },
+      end: { x: pageWidth - margin, y: pageHeight - 28 },
+      thickness: 0.5,
+      color: rgb(0.88, 0.9, 0.93)
+    });
+
+    // Bottom Divider Line
+    p.drawLine({
+      start: { x: margin, y: margin + 14 },
+      end: { x: pageWidth - margin, y: margin + 14 },
+      thickness: 0.5,
+      color: rgb(0.88, 0.9, 0.93)
+    });
+
+    // Running Footer: Exported: Sep 26, 2026 | Page 1 of 105
+    const footerDate = new Date(conv.createdAt).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+    const footerStr = `Exported: ${footerDate} | Page ${i + 1} of ${totalPages}`;
+    const footerW = fontRegular.widthOfTextAtSize(footerStr, 8);
+    p.drawText(footerStr, {
+      x: (pageWidth - footerW) / 2, // Centered
+      y: margin,
+      size: 8,
+      font: fontRegular,
+      color: mutedColor
+    });
   }
 
   const pdfBytes = await pdfDoc.save();

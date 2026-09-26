@@ -371,5 +371,107 @@ describe('6. Paged Document Layout Engine & Mandatory Overlap Prevention Tests',
     expect(docXml).toContain('    return render(request, &apos;home.html&apos;, {');
     expect(docXml).toContain('        &apos;posts&apos;: posts');
   });
+
+  it('exports exam-preparation conversation with file attachment cards, Bengali bilingual text, and extrention z card styling', async () => {
+    const examPrepConv = {
+      schemaVersion: 2,
+      id: 'test_exam_prep_extrention_z',
+      title: 'Advanced AI Chatbot & Agent powered by GLM-5.3-Flash',
+      url: 'https://chat.z.ai/chat/exam-prep',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      model: 'GLM-5.3-Flash',
+      theme: 'light',
+      stats: { words: 300, chars: 1800, tokensEst: 450, codeBlocks: 0, images: 0, tables: 1 },
+      messages: [
+        {
+          index: 0,
+          role: 'user',
+          text: 'CSE 305 Lecture on Requirement Determination.pdf PDF 1.4 MB Please prepare me for the exam using the lecture slides as the main source.',
+          blocks: [
+            {
+              kind: 'attachment',
+              name: 'CSE 305 Lecture on Requirement Determination.pdf',
+              ext: 'PDF',
+              size: '1.4 MB',
+              icon: '📄'
+            },
+            {
+              kind: 'paragraph',
+              text: 'Please prepare me for the exam using the lecture slides as the main source. Explain difficult parts in simple Bangla when necessary.'
+            }
+          ]
+        },
+        {
+          index: 1,
+          role: 'assistant',
+          blocks: [
+            {
+              kind: 'heading',
+              level: 2,
+              text: 'Topic 1: The Analysis Phase'
+            },
+            {
+              kind: 'paragraph',
+              text: 'The Analysis Phase is a stage of the SDLC where we decide WHAT the new system should do -- not HOW it will do it.'
+            },
+            {
+              kind: 'paragraph',
+              text: 'বাংলায় শেখো: "As-Is" মানে এখন যে সিস্টেমটা আছে। "To-Be" মানে ভবিষ্যতে যে নতুন সিস্টেমটা হবে।'
+            },
+            {
+              kind: 'heading',
+              level: 3,
+              text: 'Exam Answer: What is a Requirement?'
+            },
+            {
+              kind: 'paragraph',
+              text: 'A requirement is a statement of what the system must do, or a statement of characteristics the system must have.'
+            },
+            {
+              kind: 'table',
+              rows: [
+                [
+                  { text: 'Functional Requirement', isHeader: true },
+                  { text: 'Nonfunctional Requirement', isHeader: true }
+                ],
+                [
+                  { text: 'Defines system services and business functions', isHeader: false },
+                  { text: 'Defines properties, constraints, security, and speed', isHeader: false }
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    };
+
+    // 1. PDF Vector export
+    const pdfRes = await vectorPdfExporter.exportConversation(examPrepConv, {
+      pageFormat: 'a4',
+      margin: 'normal',
+      headerText: 'extrention z'
+    });
+
+    expect(pdfRes.blob.size).toBeGreaterThan(1000);
+    expect(pdfRes.filename.endsWith('.pdf')).toBe(true);
+
+    const pdfBuffer = await blobToArrayBuffer(pdfRes.blob);
+    const pdfHeader = String.fromCharCode(...new Uint8Array(pdfBuffer).subarray(0, 5));
+    expect(pdfHeader).toBe('%PDF-');
+
+    // 2. DOCX export
+    const docxRes = await docxExporter.exportConversation(examPrepConv);
+    expect(docxRes.blob.size).toBeGreaterThan(1000);
+
+    const zip = await JSZip.loadAsync(await blobToArrayBuffer(docxRes.blob));
+    const docXml = await zip.file('word/document.xml').async('string');
+
+    expect(docXml).toContain('CSE 305 Lecture on Requirement Determination.pdf');
+    expect(docXml).toContain('Topic 1: The Analysis Phase');
+    expect(docXml).toContain('বাংলায় শেখো');
+    expect(docXml).toContain('<w:tbl>');
+  });
 });
+
 

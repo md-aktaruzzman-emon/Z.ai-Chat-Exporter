@@ -110,10 +110,10 @@ async function createBlocksDocx(msg, modelName) {
       spacing: { before: 480, after: 200 },
       children: [
         new TextRun({
-          text: roleName,
+          text: isUser ? '👤 You' : `🤖 ${roleName}`,
           bold: true,
-          color: isUser ? '4F46E5' : '059669',
-          size: 28
+          color: isUser ? '059669' : '2563EB',
+          size: 26
         })
       ]
     })
@@ -121,7 +121,57 @@ async function createBlocksDocx(msg, modelName) {
 
   if (Array.isArray(msg.blocks) && msg.blocks.length > 0) {
     for (const block of msg.blocks) {
-      if (block.kind === 'heading') {
+      if (block.kind === 'attachment') {
+        const attBorder = {
+          style: BorderStyle.SINGLE,
+          size: 4,
+          color: 'CBD5E1'
+        };
+        items.push(
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            borders: {
+              top: attBorder,
+              bottom: attBorder,
+              left: { style: BorderStyle.SINGLE, size: 14, color: '10B981' },
+              right: attBorder
+            },
+            rows: [
+              new TableRow({
+                children: [
+                  new TableCell({
+                    shading: { fill: 'F8FAFC' },
+                    margins: { top: 120, bottom: 120, left: 180, right: 180 },
+                    children: [
+                      new Paragraph({
+                        spacing: { before: 0, after: 40 },
+                        children: [
+                          new TextRun({
+                            text: (block.icon || '📄') + '  ' + (block.name || 'Attachment'),
+                            bold: true,
+                            size: 21,
+                            color: '0F172A'
+                          })
+                        ]
+                      }),
+                      new Paragraph({
+                        spacing: { before: 0, after: 0 },
+                        children: [
+                          new TextRun({
+                            text: `${block.ext || 'FILE'}${block.size ? '  •  ' + block.size : ''}`,
+                            size: 18,
+                            color: '64748B'
+                          })
+                        ]
+                      })
+                    ]
+                  })
+                ]
+              })
+            ]
+          })
+        );
+      } else if (block.kind === 'heading') {
         const hLevel =
           block.level === 1
             ? HeadingLevel.HEADING_1
