@@ -179,57 +179,134 @@ export function safeWinAnsiText(str, font) {
 }
 
 /**
+ * Safely converts HTML content to clean text preserving line breaks and paragraph structure.
+ */
+export function htmlToText(html) {
+  if (!html || typeof html !== 'string') return '';
+  if (typeof DOMParser !== 'undefined') {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(`<div>${html}</div>`, 'text/html');
+      doc.querySelectorAll('br').forEach((el) => el.replaceWith('\n'));
+      doc.querySelectorAll('p, div, li, tr, h1, h2, h3, h4, h5, h6, blockquote').forEach((el) => {
+        el.append('\n');
+      });
+      return doc.body.textContent.trim();
+    } catch {
+      // fallback
+    }
+  }
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6]|blockquote)>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .trim();
+}
+
+/**
+ * Wraps code lines preserving exact whitespace, tabs, and indentation.
+ */
+function wrapCodeLine(rawLine, maxWidth, fontMono, fontSize) {
+  if (rawLine === undefined || rawLine === null) return [''];
+  const line = rawLine.replace(/\t/g, '    ');
+  if (!line) return [''];
+
+  const measure = (str) => {
+    try {
+      return fontMono.widthOfTextAtSize(safeWinAnsiText(str, fontMono), fontSize);
+    } catch {
+      return str.length * (fontSize * 0.6);
+    }
+  };
+
+  if (measure(line) <= maxWidth) {
+    return [line];
+  }
+
+  const leadingSpaces = line.match(/^ */)[0];
+  const lines = [];
+  let cur = '';
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const test = cur + char;
+    if (measure(test) <= maxWidth) {
+      cur = test;
+    } else {
+      if (cur) lines.push(cur);
+      cur = leadingSpaces + '  ' + char;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+/**
  * Splits text into lines that fit within a maximum width given a font and size.
- * Automatically wraps words and long tokens to prevent clipping.
+ * Automatically wraps words and long tokens to prevent clipping, while preserving intentional line breaks.
  */
 function wrapText(text, maxWidth, font, fontSize) {
   if (!text) return [];
-  const words = text.split(/\s+/);
-  const lines = [];
-  let currentLine = '';
+  const paragraphs = String(text).split('\n');
+  const resultLines = [];
 
-  for (let word of words) {
-    if (!word) continue;
+  for (const para of paragraphs) {
+    if (!para.trim()) {
+      resultLines.push('');
+      continue;
+    }
 
-    const measureWord = (w) => {
+    const words = para.split(/\s+/);
+    let currentLine = '';
+
+    for (let word of words) {
+      if (!word) continue;
+
+      const measureWord = (w) => {
+        try {
+          return font.widthOfTextAtSize(safeWinAnsiText(w, font), fontSize);
+        } catch {
+          return w.length * (fontSize * 0.55);
+        }
+      };
+
+      while (measureWord(word) > maxWidth && word.length > 2) {
+        let sliceLen = Math.max(1, Math.floor(word.length * 0.7));
+        while (sliceLen > 1 && measureWord(word.substring(0, sliceLen)) > maxWidth) {
+          sliceLen--;
+        }
+        const chunk = word.substring(0, sliceLen);
+        if (currentLine) {
+          resultLines.push(currentLine);
+          currentLine = '';
+        }
+        resultLines.push(chunk);
+        word = word.substring(sliceLen);
+      }
+
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
+      let testWidth = 0;
       try {
-        return font.widthOfTextAtSize(safeWinAnsiText(w, font), fontSize);
+        testWidth = font.widthOfTextAtSize(safeWinAnsiText(testLine, font), fontSize);
       } catch {
-        return w.length * (fontSize * 0.55);
+        testWidth = testLine.length * (fontSize * 0.55);
       }
-    };
 
-    while (measureWord(word) > maxWidth && word.length > 2) {
-      let sliceLen = Math.max(1, Math.floor(word.length * 0.7));
-      while (sliceLen > 1 && measureWord(word.substring(0, sliceLen)) > maxWidth) {
-        sliceLen--;
+      if (testWidth <= maxWidth) {
+        currentLine = testLine;
+      } else {
+        if (currentLine) resultLines.push(currentLine);
+        currentLine = word;
       }
-      const chunk = word.substring(0, sliceLen);
-      if (currentLine) {
-        lines.push(currentLine);
-        currentLine = '';
-      }
-      lines.push(chunk);
-      word = word.substring(sliceLen);
     }
-
-    const testLine = currentLine ? `${currentLine} ${word}` : word;
-    let testWidth = 0;
-    try {
-      testWidth = font.widthOfTextAtSize(safeWinAnsiText(testLine, font), fontSize);
-    } catch {
-      testWidth = testLine.length * (fontSize * 0.55);
-    }
-
-    if (testWidth <= maxWidth) {
-      currentLine = testLine;
-    } else {
-      if (currentLine) lines.push(currentLine);
-      currentLine = word;
-    }
+    if (currentLine) resultLines.push(currentLine);
   }
-  if (currentLine) lines.push(currentLine);
-  return lines;
+
+  return resultLines;
 }
 
 /**
@@ -500,15 +577,24 @@ export async function exportConversation(originalConversation, options = {}) {
           if (items.length > 0) {
             for (let idx = 0; idx < items.length; idx++) {
               const item = items[idx];
-              const bullet = block.ordered ? `${idx + 1}. ` : '* ';
+              const depth = item.depth || 0;
+              const isOrd = item.ordered !== undefined ? item.ordered : block.ordered;
+              const itemIdx = item.index !== undefined ? item.index : idx + 1;
+              const bullet = isOrd ? `${itemIdx}. ` : '* ';
               const bulletWidth = fontBold.widthOfTextAtSize(bullet, fontSize);
-              const text = item.text || item.html?.replace(/<[^>]*>/g, '') || '';
-              const lines = wrapText(text, contentWidth - bulletWidth - 8, fontRegular, fontSize);
+              const text = item.text || htmlToText(item.html);
+              const indentX = margin + 8 + depth * 16;
+              const lines = wrapText(
+                text,
+                contentWidth - bulletWidth - 8 - depth * 16,
+                fontRegular,
+                fontSize
+              );
 
               ensureSpace(lines.length * (fontSize + 4) + 6);
               if (lines.length > 0) {
                 page.drawText(safeWinAnsiText(bullet, fontBold), {
-                  x: margin + 8,
+                  x: indentX,
                   y: y - fontSize,
                   size: fontSize,
                   font: fontBold,
@@ -518,7 +604,7 @@ export async function exportConversation(originalConversation, options = {}) {
                 for (let li = 0; li < lines.length; li++) {
                   await drawTextLine(
                     lines[li],
-                    margin + 8 + bulletWidth + 4,
+                    indentX + bulletWidth + 4,
                     y - fontSize,
                     fontSize,
                     fontRegular,
@@ -533,7 +619,7 @@ export async function exportConversation(originalConversation, options = {}) {
             }
             y -= 6;
           } else {
-            const raw = block.text || block.html?.replace(/<[^>]*>/g, '') || '';
+            const raw = block.text || htmlToText(block.html);
             const lines = wrapText(raw, contentWidth, fontRegular, fontSize);
             for (const l of lines) {
               ensureSpace(fontSize + 5);
@@ -552,7 +638,7 @@ export async function exportConversation(originalConversation, options = {}) {
             y -= 6;
           }
         } else if (block.kind === 'quote') {
-          const raw = block.text || block.html?.replace(/<[^>]*>/g, '') || '';
+          const raw = block.text || htmlToText(block.html);
           const lines = wrapText(raw, contentWidth - 20, fontRegular, fontSize);
           const blockH = lines.length * (fontSize + 4) + 6;
 
@@ -579,18 +665,14 @@ export async function exportConversation(originalConversation, options = {}) {
           }
           y -= 8;
         } else if (block.kind === 'code') {
-          // Wrap long code lines so no code is ever clipped or truncated
+          // Wrap long code lines PRESERVING EXACT WHITESPACE & INDENTATION
           const rawLines = (block.code || '').split('\n');
           const maxCodeWidth = contentWidth - 20;
           const codeLines = [];
 
           for (const rawLine of rawLines) {
-            const subLines = wrapText(rawLine, maxCodeWidth, fontMono, 8.5);
-            if (subLines.length > 0) {
-              codeLines.push(...subLines);
-            } else {
-              codeLines.push('');
-            }
+            const subLines = wrapCodeLine(rawLine, maxCodeWidth, fontMono, 8.5);
+            codeLines.push(...subLines);
           }
 
           const blockHeight = codeLines.length * 13 + 16;
@@ -841,7 +923,7 @@ export async function exportConversation(originalConversation, options = {}) {
           }
         } else {
           // Paragraph / Text / Other
-          const raw = block.text || block.html?.replace(/<[^>]*>/g, '') || '';
+          const raw = block.text || htmlToText(block.html);
           if (raw.trim()) {
             const lines = wrapText(raw, contentWidth, fontRegular, fontSize);
             for (const l of lines) {

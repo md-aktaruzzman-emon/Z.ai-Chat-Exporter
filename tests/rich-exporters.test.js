@@ -150,3 +150,111 @@ describe('4. Comprehensive Rich Exporter Generation & Negative Checks', () => {
     expect(res.previewText).toContain('কম্পিউটার পারফরম্যান্স খুব গুরুত্বপূর্ণ');
   });
 });
+
+describe('5. Prompt-Specific Fidelity & Structural Regression Tests', () => {
+  it('preserves exact multi-line Python code structure and 4-space indentation in DOCX XML', async () => {
+    const codeSnippet = `from django.shortcuts import render\n\ndef home(request):\n    posts = Post.objects.all()\n\n    return render(request, 'home.html', {\n        'posts': posts\n    })`;
+
+    const conv = {
+      schemaVersion: 2,
+      id: 'test_django_code',
+      title: 'Django Code Test',
+      url: 'https://chat.z.ai/test',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      model: 'Z.ai',
+      theme: 'light',
+      stats: { words: 20, chars: 150, tokensEst: 37, codeBlocks: 1, images: 0, tables: 0 },
+      messages: [
+        {
+          index: 0,
+          role: 'assistant',
+          html: '<pre><code class="language-python">' + codeSnippet + '</code></pre>',
+          text: codeSnippet,
+          blocks: [
+            {
+              kind: 'code',
+              language: 'python',
+              code: codeSnippet
+            }
+          ]
+        }
+      ]
+    };
+
+    const res = await docxExporter.exportConversation(conv);
+    const arrayBuffer = await blobToArrayBuffer(res.blob);
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    const docXml = await zip.file('word/document.xml').async('string');
+
+    // Verify indentation & structure in DOCX XML
+    expect(docXml).toContain('def home(request):');
+    expect(docXml).toContain('    posts = Post.objects.all()');
+    expect(docXml).toContain('posts');
+  });
+
+  it('exports structured matrix table with real Table structures', async () => {
+    const tableHtml = `<table><thead><tr><th>Feature</th><th>Process</th><th>Project</th></tr></thead><tbody><tr><td>Product</td><td>Repeat</td><td>New</td></tr><tr><td>Objective</td><td>Several</td><td>One</td></tr><tr><td>Duration</td><td>Ongoing</td><td>Limited</td></tr></tbody></table>`;
+
+    const conv = {
+      schemaVersion: 2,
+      id: 'test_table_matrix',
+      title: 'Matrix Table Test',
+      url: 'https://chat.z.ai/test',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      model: 'Z.ai',
+      theme: 'light',
+      stats: { words: 20, chars: 150, tokensEst: 37, codeBlocks: 0, images: 0, tables: 1 },
+      messages: [
+        {
+          index: 0,
+          role: 'assistant',
+          html: tableHtml,
+          text: 'Feature Process Project',
+          blocks: [
+            {
+              kind: 'table',
+              html: tableHtml,
+              rows: [
+                [
+                  { text: 'Feature', isHeader: true },
+                  { text: 'Process', isHeader: true },
+                  { text: 'Project', isHeader: true }
+                ],
+                [
+                  { text: 'Product', isHeader: false },
+                  { text: 'Repeat', isHeader: false },
+                  { text: 'New', isHeader: false }
+                ],
+                [
+                  { text: 'Objective', isHeader: false },
+                  { text: 'Several', isHeader: false },
+                  { text: 'One', isHeader: false }
+                ],
+                [
+                  { text: 'Duration', isHeader: false },
+                  { text: 'Ongoing', isHeader: false },
+                  { text: 'Limited', isHeader: false }
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    };
+
+    const res = await docxExporter.exportConversation(conv);
+    const arrayBuffer = await blobToArrayBuffer(res.blob);
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    const docXml = await zip.file('word/document.xml').async('string');
+
+    // Verify table XML tags <w:tbl>, <w:tr>, <w:tc>
+    expect(docXml).toContain('<w:tbl>');
+    expect(docXml).toContain('<w:tr');
+    expect(docXml).toContain('<w:tc>');
+    expect(docXml).toContain('Feature');
+    expect(docXml).toContain('Product');
+    expect(docXml).toContain('Ongoing');
+  });
+});

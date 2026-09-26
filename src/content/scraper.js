@@ -115,326 +115,395 @@ export function parseBlocks(element, options = {}) {
   const { includeThinking = true, includeArtifacts = true, includeCitations = true } = options;
   const blocks = [];
 
-  function processNode(node) {
-    if (!node || node.nodeType !== 1) return;
+  function isBlockElement(node) {
+    if (!node || node.nodeType !== 1) return false;
     const tag = node.tagName.toLowerCase();
-
-    // 1. Thinking / Reasoning
-    if (node.matches?.('[class*="think"], details[class*="reason"], .reasoning-block')) {
-      if (includeThinking) {
-        const text = node.textContent.trim();
-        if (text) {
-          blocks.push({ kind: 'thinking', text });
-        }
-      }
-      return;
-    }
-
-    // 2. Tool Calls
-    if (node.matches?.('[class*="tool-call"], [data-tool]')) {
-      const tool =
-        node.getAttribute('data-tool') ||
-        node.querySelector('.tool-name')?.textContent.trim() ||
-        'Tool';
-      const inputJson = node.querySelector('.tool-input')?.textContent.trim() || '{}';
-      const outputSummary = node.querySelector('.tool-output')?.textContent.trim() || '';
-      blocks.push({ kind: 'toolCall', tool, inputJson, outputSummary });
-      return;
-    }
-
-    // 3. Search Results block
-    if (node.matches?.('.search-results-block, [class*="search-results"]')) {
-      const query = node.getAttribute('data-query') || '';
-      const items = [];
-      const searchItems = node.querySelectorAll('.search-item, [class*="search-item"]');
-      for (const item of searchItems) {
-        const link = item.querySelector('a') || item;
-        const title = link.textContent.trim();
-        const url = link.getAttribute('href') || '';
-        const snippet = item.querySelector('.snippet')?.textContent.trim() || '';
-        items.push({ title, url, snippet });
-        if (includeCitations && url) {
-          blocks.push({ kind: 'citation', title, url, snippet });
-        }
-      }
-      if (items.length > 0) {
-        blocks.push({ kind: 'searchResult', query, results: items });
-      }
-      return;
-    }
-
-    // 4. Artifacts / Canvas / Code Editor
-    if (node.matches?.('[class*="artifact"], [class*="canvas"], [class*="code-editor"]')) {
-      if (includeArtifacts) {
-        const title =
-          node.getAttribute('data-title') ||
-          node.querySelector('h4, h3')?.textContent.trim() ||
-          'Artifact';
-        blocks.push({ kind: 'artifact', title, html: sanitizeHtml(node.innerHTML) });
-      }
-      return;
-    }
-
-    // 5. Code block (PRE)
-    if (tag === 'pre') {
-      const codeEl = node.querySelector('code') || node;
-      let language = 'text';
-      const langMatch = (node.className + ' ' + codeEl.className).match(/language-([\w+-]+)/i);
-      if (langMatch) {
-        language = langMatch[1].toLowerCase();
-      }
-      const rawCode = codeEl.textContent || '';
-      blocks.push({ kind: 'code', language, code: rawCode });
-      return;
-    }
-
-    // 6. Math display
     if (
-      node.matches?.('.katex-display, .math-block, [data-tex]') ||
-      node.classList?.contains('katex-display')
+      [
+        'p',
+        'pre',
+        'table',
+        'ul',
+        'ol',
+        'blockquote',
+        'figure',
+        'svg',
+        'canvas',
+        'img',
+        'h1',
+        'h2',
+        'h3',
+        'h4',
+        'h5',
+        'h6',
+        'hr',
+        'details'
+      ].includes(tag)
     ) {
-      let tex = '';
-      const annotation = node.querySelector('.katex-mathml annotation');
-      if (annotation && annotation.textContent.trim()) {
-        tex = annotation.textContent.trim();
-      } else if (node.getAttribute('data-tex')) {
-        tex = node.getAttribute('data-tex').trim();
-      } else {
-        tex = node.textContent.trim();
-      }
-      if (tex) {
-        blocks.push({ kind: 'math', tex, displayMode: true });
-        return;
-      }
+      return true;
     }
-
-    // 7. Table with structured rows
-    if (tag === 'table') {
-      const trs = Array.from(node.querySelectorAll('tr'));
-      const rows = trs.map((tr) => {
-        return Array.from(tr.querySelectorAll('th, td')).map((cell) => ({
-          text: cell.textContent.trim(),
-          html: sanitizeHtml(cell.innerHTML),
-          isHeader: cell.tagName.toLowerCase() === 'th',
-          colspan: parseInt(cell.getAttribute('colspan') || '1', 10),
-          rowspan: parseInt(cell.getAttribute('rowspan') || '1', 10)
-        }));
-      });
-      blocks.push({
-        kind: 'table',
-        html: sanitizeHtml(node.outerHTML),
-        rows
-      });
-      return;
+    if (
+      node.matches?.(
+        'svg, canvas, img, .mermaid, [class*="diagram"], [class*="chart"], [class*="think"], details[class*="reason"], .reasoning-block, [class*="artifact"], [class*="canvas"], [class*="code-editor"], [class*="tool-call"], [data-tool], .search-results-block, [class*="search-results"], .katex-display, .math-block, [data-tex]'
+      )
+    ) {
+      return true;
     }
+    return false;
+  }
 
-    // 8. Canvas / Interactive Chart
-    if (tag === 'canvas') {
-      try {
-        const dataUrl = node.toDataURL?.('image/png');
-        if (dataUrl) {
-          blocks.push({
-            kind: 'image',
-            src: dataUrl,
-            dataUrl,
-            alt: node.getAttribute('aria-label') || 'Chart / Canvas Drawing',
-            width: node.width,
-            height: node.height
-          });
-          return;
-        }
-      } catch (err) {
-        console.warn('[Scraper] Canvas capture error:', err);
+  function processContainer(container) {
+    if (!container) return;
+    const childNodes = Array.from(container.childNodes);
+    let inlineBuffer = [];
+
+    function flushInlineBuffer() {
+      if (inlineBuffer.length === 0) return;
+
+      const wrapper = document.createElement('div');
+      let textContent = '';
+      for (const n of inlineBuffer) {
+        wrapper.appendChild(n.cloneNode(true));
+        textContent += n.nodeType === 3 ? n.textContent : n.textContent || '';
       }
-    }
 
-    // 9. SVG / Mermaid Diagram / Visual Chart
-    if (tag === 'svg' || node.matches?.('.mermaid, [class*="diagram"], [class*="chart"]')) {
-      const svgEl = tag === 'svg' ? node : node.querySelector('svg');
-      if (svgEl) {
-        let svgStr = svgEl.outerHTML;
-        if (!svgStr.includes('xmlns=')) {
-          svgStr = svgStr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-        }
-        const dataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(svgStr)}`;
-        const width = parseFloat(svgEl.getAttribute('width') || '0') || undefined;
-        const height = parseFloat(svgEl.getAttribute('height') || '0') || undefined;
+      const trimmedText = textContent.trim();
+      const hasContent = trimmedText.length > 0 || wrapper.querySelector('img, svg, canvas, br');
+
+      if (hasContent) {
         blocks.push({
-          kind: 'image',
-          src: dataUrl,
-          dataUrl,
-          alt: svgEl.getAttribute('aria-label') || 'Diagram',
-          width,
-          height
+          kind: 'paragraph',
+          text: trimmedText,
+          html: sanitizeHtml(wrapper.innerHTML)
         });
-        return;
       }
+      inlineBuffer = [];
     }
 
-    // 10. Image / Figure
-    if (tag === 'figure' || tag === 'img') {
-      const img = tag === 'img' ? node : node.querySelector('img');
-      if (img) {
-        const src = img.getAttribute('src') || '';
-        const alt = img.getAttribute('alt') || 'Image';
-        const width = img.width || undefined;
-        const height = img.height || undefined;
-        const dataUrl = src.startsWith('data:') ? src : undefined;
-        blocks.push({ kind: 'image', src, dataUrl, alt, width, height });
-        return;
-      }
-    }
-
-    // 11. Headings
-    if (/^h[1-6]$/.test(tag)) {
-      const level = parseInt(tag[1], 10);
-      blocks.push({
-        kind: 'heading',
-        level,
-        text: node.textContent.trim(),
-        html: sanitizeHtml(node.innerHTML)
-      });
-      return;
-    }
-
-    // 12. List (UL, OL) with individual items
-    if (tag === 'ul' || tag === 'ol') {
-      const lis = Array.from(node.querySelectorAll(':scope > li'));
-      const items = lis.map((li) => {
-        // Exclude nested list text from this item's text (child lists are
-        // emitted as their own blocks below), preventing double-counting.
-        const clone = li.cloneNode(true);
-        clone.querySelectorAll('ul, ol').forEach((n) => n.remove());
-        return {
-          text: clone.textContent.trim(),
-          html: sanitizeHtml(li.innerHTML)
-        };
-      });
-      blocks.push({
-        kind: 'list',
-        ordered: tag === 'ol',
-        html: sanitizeHtml(node.outerHTML),
-        items:
-          items.length > 0
-            ? items
-            : [{ text: node.textContent.trim(), html: sanitizeHtml(node.innerHTML) }]
-      });
-      // Emit nested lists as their own blocks AFTER the parent list block
-      for (const li of lis) {
-        for (const nested of li.querySelectorAll(':scope > ul, :scope > ol')) {
-          processNode(nested);
+    for (const node of childNodes) {
+      if (node.nodeType === 3) {
+        // Text node
+        if (node.textContent.trim().length > 0 || inlineBuffer.length > 0) {
+          inlineBuffer.push(node);
         }
-      }
-      return;
-    }
+      } else if (node.nodeType === 1) {
+        const tag = node.tagName.toLowerCase();
 
-    // 13. Quote (BLOCKQUOTE)
-    if (tag === 'blockquote') {
-      blocks.push({
-        kind: 'quote',
-        text: node.textContent.trim(),
-        html: sanitizeHtml(node.outerHTML)
-      });
-      return;
-    }
-
-    // 14. Paragraph
-    if (tag === 'p') {
-      const hasImg = node.querySelector('img, svg, canvas');
-      if (hasImg && node.children.length === 1) {
-        processNode(node.firstElementChild);
-        return;
-      }
-
-      // Check if paragraph is purely a display math wrapper (e.g. <p>$$...$$</p> or <p><div class="katex-display">...</div></p>)
-      const displayMathEl = node.querySelector('.katex-display, .math-block');
-      if (displayMathEl && node.children.length === 1) {
-        processNode(displayMathEl);
-        return;
-      }
-
-      const pText = node.textContent.trim();
-      if (/^\$\$[\s\S]+\$\$$/.test(pText) || /^\\\[[\s\S]+\\\]$/.test(pText)) {
-        const tex = pText.replace(/^\$\$|^\\\[|\$\$$|\\\]$/g, '').trim();
-        if (tex) {
-          blocks.push({ kind: 'math', tex, displayMode: true });
-          return;
+        // 1. Thinking / Reasoning
+        if (node.matches?.('[class*="think"], details[class*="reason"], .reasoning-block')) {
+          flushInlineBuffer();
+          if (includeThinking) {
+            const text = node.textContent.trim();
+            if (text) {
+              blocks.push({ kind: 'thinking', text });
+            }
+          }
+          continue;
         }
-      }
 
-      if (includeCitations) {
-        const cites = node.querySelectorAll('a[class*="citation"], sup[class*="cite"]');
-        for (const c of cites) {
-          const href = c.getAttribute('href') || c.querySelector('a')?.getAttribute('href') || '';
-          const title = c.textContent.trim();
-          if (href) {
-            blocks.push({ kind: 'citation', title, url: href });
+        // 2. Tool Calls
+        if (node.matches?.('[class*="tool-call"], [data-tool]')) {
+          flushInlineBuffer();
+          const tool =
+            node.getAttribute('data-tool') ||
+            node.querySelector('.tool-name')?.textContent.trim() ||
+            'Tool';
+          const inputJson = node.querySelector('.tool-input')?.textContent.trim() || '{}';
+          const outputSummary = node.querySelector('.tool-output')?.textContent.trim() || '';
+          blocks.push({ kind: 'toolCall', tool, inputJson, outputSummary });
+          continue;
+        }
+
+        // 3. Search Results block
+        if (node.matches?.('.search-results-block, [class*="search-results"]')) {
+          flushInlineBuffer();
+          const query = node.getAttribute('data-query') || '';
+          const items = [];
+          const searchItems = node.querySelectorAll('.search-item, [class*="search-item"]');
+          for (const item of searchItems) {
+            const link = item.querySelector('a') || item;
+            const title = link.textContent.trim();
+            const url = link.getAttribute('href') || '';
+            const snippet = item.querySelector('.snippet')?.textContent.trim() || '';
+            items.push({ title, url, snippet });
+            if (includeCitations && url) {
+              blocks.push({ kind: 'citation', title, url, snippet });
+            }
+          }
+          if (items.length > 0) {
+            blocks.push({ kind: 'searchResult', query, results: items });
+          }
+          continue;
+        }
+
+        // 4. Artifacts / Canvas / Code Editor
+        if (node.matches?.('[class*="artifact"], [class*="canvas"], [class*="code-editor"]')) {
+          flushInlineBuffer();
+          if (includeArtifacts) {
+            const title =
+              node.getAttribute('data-title') ||
+              node.querySelector('h4, h3')?.textContent.trim() ||
+              'Artifact';
+            blocks.push({ kind: 'artifact', title, html: sanitizeHtml(node.innerHTML) });
+          }
+          continue;
+        }
+
+        // 5. Code block (PRE)
+        if (tag === 'pre') {
+          flushInlineBuffer();
+          const codeEl = node.querySelector('code') || node;
+          let language = 'text';
+          const langMatch = (node.className + ' ' + codeEl.className).match(/language-([\w+-]+)/i);
+          if (langMatch) {
+            language = langMatch[1].toLowerCase();
+          }
+          const rawCode = codeEl.textContent || '';
+          blocks.push({ kind: 'code', language, code: rawCode });
+          continue;
+        }
+
+        // 6. Math display
+        if (
+          node.matches?.('.katex-display, .math-block, [data-tex]') ||
+          node.classList?.contains('katex-display')
+        ) {
+          flushInlineBuffer();
+          let tex = '';
+          const annotation = node.querySelector('.katex-mathml annotation');
+          if (annotation && annotation.textContent.trim()) {
+            tex = annotation.textContent.trim();
+          } else if (node.getAttribute('data-tex')) {
+            tex = node.getAttribute('data-tex').trim();
+          } else {
+            tex = node.textContent.trim();
+          }
+          if (tex) {
+            blocks.push({ kind: 'math', tex, displayMode: true });
+            continue;
           }
         }
-      }
 
-      // Preserve paragraph as one single rich structure containing inline math (DO NOT push duplicate math block)
-      blocks.push({
-        kind: 'paragraph',
-        text: pText,
-        html: sanitizeHtml(node.outerHTML)
-      });
-      return;
+        // 7. Table with structured rows
+        if (tag === 'table') {
+          flushInlineBuffer();
+          const trs = Array.from(node.querySelectorAll('tr'));
+          const rows = trs.map((tr) => {
+            return Array.from(tr.querySelectorAll('th, td')).map((cell) => ({
+              text: cell.textContent.trim(),
+              html: sanitizeHtml(cell.innerHTML),
+              isHeader: cell.tagName.toLowerCase() === 'th',
+              colspan: parseInt(cell.getAttribute('colspan') || '1', 10),
+              rowspan: parseInt(cell.getAttribute('rowspan') || '1', 10)
+            }));
+          });
+          blocks.push({
+            kind: 'table',
+            html: sanitizeHtml(node.outerHTML),
+            rows
+          });
+          continue;
+        }
+
+        // 8. Canvas / Interactive Chart
+        if (tag === 'canvas') {
+          flushInlineBuffer();
+          try {
+            const dataUrl = node.toDataURL?.('image/png');
+            if (dataUrl) {
+              blocks.push({
+                kind: 'image',
+                src: dataUrl,
+                dataUrl,
+                alt: node.getAttribute('aria-label') || 'Chart / Canvas Drawing',
+                width: node.width,
+                height: node.height,
+                aspectRatio: node.width / (node.height || 1)
+              });
+              continue;
+            }
+          } catch (err) {
+            console.warn('[Scraper] Canvas capture error:', err);
+          }
+        }
+
+        // 9. SVG / Mermaid Diagram / Visual Chart
+        if (tag === 'svg' || node.matches?.('.mermaid, [class*="diagram"], [class*="chart"]')) {
+          flushInlineBuffer();
+          const svgEl = tag === 'svg' ? node : node.querySelector('svg');
+          if (svgEl) {
+            let svgStr = svgEl.outerHTML;
+            if (!svgStr.includes('xmlns=')) {
+              svgStr = svgStr.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+            }
+            const dataUrl = `data:image/svg+xml;utf8,${encodeURIComponent(svgStr)}`;
+            const width = parseFloat(svgEl.getAttribute('width') || '0') || undefined;
+            const height = parseFloat(svgEl.getAttribute('height') || '0') || undefined;
+            blocks.push({
+              kind: 'image',
+              src: dataUrl,
+              dataUrl,
+              alt: svgEl.getAttribute('aria-label') || 'Diagram',
+              width,
+              height,
+              aspectRatio: width && height ? width / height : undefined
+            });
+            continue;
+          }
+        }
+
+        // 10. Image / Figure
+        if (tag === 'figure' || tag === 'img') {
+          flushInlineBuffer();
+          const img = tag === 'img' ? node : node.querySelector('img');
+          if (img) {
+            const src = img.getAttribute('src') || '';
+            const alt = img.getAttribute('alt') || 'Image';
+            const width = img.width || undefined;
+            const height = img.height || undefined;
+            const dataUrl = src.startsWith('data:') ? src : undefined;
+            blocks.push({ kind: 'image', src, dataUrl, alt, width, height });
+            continue;
+          }
+        }
+
+        // 11. Headings
+        if (/^h[1-6]$/.test(tag)) {
+          flushInlineBuffer();
+          const level = parseInt(tag[1], 10);
+          blocks.push({
+            kind: 'heading',
+            level,
+            text: node.textContent.trim(),
+            html: sanitizeHtml(node.innerHTML)
+          });
+          continue;
+        }
+
+        // 12. List (UL, OL) with individual items and depth support
+        if (tag === 'ul' || tag === 'ol') {
+          flushInlineBuffer();
+
+          function extractListBlock(listNode, depth = 0) {
+            const isOrd = listNode.tagName.toLowerCase() === 'ol';
+            const lis = Array.from(listNode.querySelectorAll(':scope > li'));
+            const items = [];
+            const nestedListsToEmit = [];
+
+            for (let idx = 0; idx < lis.length; idx++) {
+              const li = lis[idx];
+              const clone = li.cloneNode(true);
+              const childLists = Array.from(clone.querySelectorAll(':scope > ul, :scope > ol'));
+              childLists.forEach((n) => n.remove());
+
+              items.push({
+                text: clone.textContent.trim(),
+                html: sanitizeHtml(clone.innerHTML),
+                depth,
+                ordered: isOrd,
+                index: idx + 1
+              });
+
+              // Collect direct child lists to emit as nested blocks
+              const directChildLists = Array.from(li.querySelectorAll(':scope > ul, :scope > ol'));
+              for (const cl of directChildLists) {
+                nestedListsToEmit.push(cl);
+              }
+            }
+
+            blocks.push({
+              kind: 'list',
+              ordered: isOrd,
+              html: sanitizeHtml(listNode.outerHTML),
+              items:
+                items.length > 0
+                  ? items
+                  : [{ text: listNode.textContent.trim(), html: sanitizeHtml(listNode.innerHTML), depth }]
+            });
+
+            for (const nl of nestedListsToEmit) {
+              extractListBlock(nl, depth + 1);
+            }
+          }
+
+          extractListBlock(node, 0);
+          continue;
+        }
+
+        // 13. Quote (BLOCKQUOTE)
+        if (tag === 'blockquote') {
+          flushInlineBuffer();
+          blocks.push({
+            kind: 'quote',
+            text: node.textContent.trim(),
+            html: sanitizeHtml(node.outerHTML)
+          });
+          continue;
+        }
+
+        // 14. Paragraph
+        if (tag === 'p') {
+          flushInlineBuffer();
+
+          const hasImg = node.querySelector('img, svg, canvas');
+          if (hasImg && node.children.length === 1) {
+            processContainer(node);
+            continue;
+          }
+
+          const displayMathEl = node.querySelector('.katex-display, .math-block');
+          if (displayMathEl && node.children.length === 1) {
+            processContainer(node);
+            continue;
+          }
+
+          const pText = node.textContent.trim();
+          if (/^\$\$[\s\S]+\$\$$/.test(pText) || /^\\\[[\s\S]+\\\]$/.test(pText)) {
+            const tex = pText.replace(/^\$\$|^\\\[|\$\$$|\\\]$/g, '').trim();
+            if (tex) {
+              blocks.push({ kind: 'math', tex, displayMode: true });
+              continue;
+            }
+          }
+
+          if (includeCitations) {
+            const cites = node.querySelectorAll('a[class*="citation"], sup[class*="cite"]');
+            for (const c of cites) {
+              const href = c.getAttribute('href') || c.querySelector('a')?.getAttribute('href') || '';
+              const title = c.textContent.trim();
+              if (href) {
+                blocks.push({ kind: 'citation', title, url: href });
+              }
+            }
+          }
+
+          blocks.push({
+            kind: 'paragraph',
+            text: pText,
+            html: sanitizeHtml(node.outerHTML)
+          });
+          continue;
+        }
+
+        // Generic container node (div, section, article, etc.)
+        if (isBlockElement(node) || Array.from(node.children).some(isBlockElement)) {
+          flushInlineBuffer();
+          processContainer(node);
+        } else {
+          inlineBuffer.push(node);
+        }
+      }
     }
 
-    // If container element (div, section, article, etc.)
-    const hasBlockChildren = Array.from(node.children).some((child) => {
-      const cTag = child.tagName.toLowerCase();
-      return (
-        [
-          'p',
-          'pre',
-          'table',
-          'ul',
-          'ol',
-          'blockquote',
-          'figure',
-          'svg',
-          'canvas',
-          'img',
-          'h1',
-          'h2',
-          'h3',
-          'h4',
-          'h5',
-          'h6',
-          'details'
-        ].includes(cTag) ||
-        child.matches?.(
-          'svg, canvas, img, .mermaid, [class*="diagram"], [class*="chart"], [class*="think"], [class*="artifact"], [class*="tool-call"], .search-results-block, .katex-display'
-        )
-      );
-    });
-
-    if (hasBlockChildren) {
-      for (const child of node.children) {
-        processNode(child);
-      }
-    } else {
-      const text = node.textContent.trim();
-      if (text) {
-        blocks.push({ kind: 'paragraph', html: sanitizeHtml(node.outerHTML) });
-      }
-    }
+    flushInlineBuffer();
   }
 
-  const directChildren = Array.from(element.children);
-  if (directChildren.length > 0) {
-    for (const child of directChildren) {
-      processNode(child);
-    }
-  } else {
-    processNode(element);
-  }
+  processContainer(element);
 
   if (blocks.length === 0 && element.textContent.trim()) {
     blocks.push({
       kind: 'paragraph',
+      text: element.textContent.trim(),
       html: sanitizeHtml(element.innerHTML)
     });
   }

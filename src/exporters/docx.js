@@ -43,16 +43,24 @@ function parseHtmlToTextRuns(htmlOrText) {
           // Text node
           const text = node.textContent;
           if (text) {
-            runs.push(
-              new TextRun({
-                text,
-                bold: state.bold,
-                italics: state.italic,
-                font: state.code ? 'Consolas' : undefined,
-                color: state.link ? '2563EB' : undefined,
-                size: state.code ? 19 : 22
-              })
-            );
+            const lines = text.split('\n');
+            lines.forEach((line, idx) => {
+              if (idx > 0) {
+                runs.push(new TextRun({ text: '', break: 1 }));
+              }
+              if (line.length > 0) {
+                runs.push(
+                  new TextRun({
+                    text: line,
+                    bold: state.bold,
+                    italics: state.italic,
+                    font: state.code ? 'Consolas' : undefined,
+                    color: state.link ? '2563EB' : undefined,
+                    size: state.code ? 19 : 22
+                  })
+                );
+              }
+            });
           }
           return;
         }
@@ -98,13 +106,13 @@ async function createBlocksDocx(msg, modelName) {
   items.push(
     new Paragraph({
       heading: HeadingLevel.HEADING_2,
-      spacing: { before: 240, after: 120 },
+      spacing: { before: 480, after: 200 },
       children: [
         new TextRun({
           text: roleName,
           bold: true,
           color: isUser ? '4F46E5' : '059669',
-          size: 26
+          size: 28
         })
       ]
     })
@@ -125,7 +133,7 @@ async function createBlocksDocx(msg, modelName) {
         items.push(
           new Paragraph({
             heading: hLevel,
-            spacing: { before: 200, after: 100 },
+            spacing: { before: 360, after: 180 },
             children: parseHtmlToTextRuns(block.html || block.text)
           })
         );
@@ -133,13 +141,19 @@ async function createBlocksDocx(msg, modelName) {
         const listItems = block.items || [];
         if (listItems.length > 0) {
           listItems.forEach((it, idx) => {
+            const depth = it.depth || 0;
+            const isOrd = it.ordered !== undefined ? it.ordered : block.ordered;
+            const itemIndex = it.index !== undefined ? it.index : idx + 1;
+            const bulletStr = isOrd ? `${itemIndex}. ` : '• ';
+            const leftIndent = 480 + depth * 360;
+
             items.push(
               new Paragraph({
-                spacing: { before: 40, after: 40 },
-                indent: { left: 360 },
+                spacing: { before: 60, after: 60 },
+                indent: { left: leftIndent, hanging: 240 },
                 children: [
                   new TextRun({
-                    text: block.ordered ? `${idx + 1}. ` : '• ',
+                    text: bulletStr,
                     bold: true,
                     size: 22
                   }),
@@ -151,7 +165,7 @@ async function createBlocksDocx(msg, modelName) {
         } else {
           items.push(
             new Paragraph({
-              spacing: { before: 60, after: 60 },
+              spacing: { before: 100, after: 100 },
               children: parseHtmlToTextRuns(block.html || block.text)
             })
           );
@@ -159,8 +173,8 @@ async function createBlocksDocx(msg, modelName) {
       } else if (block.kind === 'quote') {
         items.push(
           new Paragraph({
-            indent: { left: 720 },
-            spacing: { before: 100, after: 100 },
+            indent: { left: 860 },
+            spacing: { before: 180, after: 180 },
             children: [
               new TextRun({
                 text: block.text || block.html?.replace(/<[^>]*>/g, '') || '',
@@ -172,7 +186,9 @@ async function createBlocksDocx(msg, modelName) {
           })
         );
       } else if (block.kind === 'code') {
-        const lines = (block.code || '').split('\n');
+        // PRESERVE EXACT INDENTATION & TABS (replace \t with 4 spaces for Word)
+        const rawCode = (block.code || '').replace(/\t/g, '    ');
+        const lines = rawCode.split('\n');
         const codeRuns = lines.map(
           (line, idx) =>
             new TextRun({
@@ -204,7 +220,7 @@ async function createBlocksDocx(msg, modelName) {
                 children: [
                   new TableCell({
                     shading: { fill: 'F8FAFC' },
-                    margins: { top: 120, bottom: 120, left: 180, right: 180 },
+                    margins: { top: 180, bottom: 180, left: 240, right: 240 },
                     children: [
                       new Paragraph({
                         spacing: { before: 0, after: 0 },
@@ -223,7 +239,7 @@ async function createBlocksDocx(msg, modelName) {
           const docxMathElement = renderMathToDocxMath(block.tex, block.displayMode);
           items.push(
             new Paragraph({
-              spacing: { before: 120, after: 120 },
+              spacing: { before: 180, after: 180 },
               alignment: block.displayMode ? 'center' : 'left',
               children: [docxMathElement]
             })
@@ -232,7 +248,7 @@ async function createBlocksDocx(msg, modelName) {
           console.warn('[DOCX Exporter] Math OMML error, fallback to run:', mErr);
           items.push(
             new Paragraph({
-              spacing: { before: 100, after: 100 },
+              spacing: { before: 180, after: 180 },
               children: [
                 new TextRun({
                   text: block.tex || '',
@@ -247,8 +263,8 @@ async function createBlocksDocx(msg, modelName) {
       } else if (block.kind === 'thinking') {
         items.push(
           new Paragraph({
-            indent: { left: 360 },
-            spacing: { before: 80, after: 80 },
+            indent: { left: 480 },
+            spacing: { before: 120, after: 120 },
             children: [
               new TextRun({
                 text: `Thinking Process: ${block.text}`,
@@ -262,7 +278,7 @@ async function createBlocksDocx(msg, modelName) {
       } else if (block.kind === 'citation') {
         items.push(
           new Paragraph({
-            spacing: { before: 60, after: 60 },
+            spacing: { before: 120, after: 120 },
             children: [
               new TextRun({
                 text: `Source: ${block.title} (${block.url})`,
@@ -288,11 +304,12 @@ async function createBlocksDocx(msg, modelName) {
               const cells = rowCells.map((c) => {
                 return new TableCell({
                   shading: isHeader ? { fill: 'F1F5F9' } : undefined,
-                  margins: { top: 100, bottom: 100, left: 140, right: 140 },
+                  margins: { top: 140, bottom: 140, left: 180, right: 180 },
                   columnSpan: c.colspan > 1 ? c.colspan : undefined,
                   rowSpan: c.rowspan > 1 ? c.rowspan : undefined,
                   children: [
                     new Paragraph({
+                      spacing: { before: 0, after: 0 },
                       children: parseHtmlToTextRuns(c.html || c.text)
                     })
                   ]
@@ -325,7 +342,7 @@ async function createBlocksDocx(msg, modelName) {
           const raw = block.text || block.html?.replace(/<[^>]*>/g, ' ') || '';
           items.push(
             new Paragraph({
-              spacing: { before: 60, after: 60 },
+              spacing: { before: 120, after: 120 },
               children: [new TextRun({ text: raw, size: 22 })]
             })
           );
@@ -337,7 +354,6 @@ async function createBlocksDocx(msg, modelName) {
           const convResult = await imageSourceToPngBytes(imgSrc);
 
           if (convResult && convResult.bytes) {
-            // Calculate proportional dimensions based on page content width (~500px in Word 1-inch margins)
             const maxWordWidth = 520;
             const maxWordHeight = 400;
             const fitted = fitDimensions(
@@ -349,7 +365,7 @@ async function createBlocksDocx(msg, modelName) {
 
             items.push(
               new Paragraph({
-                spacing: { before: 120, after: 120 },
+                spacing: { before: 180, after: 180 },
                 alignment: 'center',
                 children: [
                   new ImageRun({
@@ -367,7 +383,7 @@ async function createBlocksDocx(msg, modelName) {
           console.warn('[DOCX Exporter] Image embedding failed:', imgErr);
           items.push(
             new Paragraph({
-              spacing: { before: 60, after: 60 },
+              spacing: { before: 120, after: 120 },
               children: [
                 new TextRun({
                   text: `[Image: ${block.alt || 'Chat Image'}]`,
@@ -382,7 +398,7 @@ async function createBlocksDocx(msg, modelName) {
       } else {
         items.push(
           new Paragraph({
-            spacing: { before: 60, after: 120 },
+            spacing: { before: 60, after: 140 },
             children: parseHtmlToTextRuns(block.html || block.text)
           })
         );
@@ -391,7 +407,7 @@ async function createBlocksDocx(msg, modelName) {
   } else if (msg.html || msg.text) {
     items.push(
       new Paragraph({
-        spacing: { before: 60, after: 120 },
+        spacing: { before: 60, after: 140 },
         children: parseHtmlToTextRuns(msg.html || msg.text)
       })
     );
