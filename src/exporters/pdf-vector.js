@@ -1,7 +1,8 @@
 /**
  * @file pdf-vector.js
  * Selectable, searchable, deterministic Vector PDF generator using pdf-lib.
- * Section 16.1 of the authoritative specification.
+ * Built with a Paged Document Layout Engine to accurately measure block heights
+ * and eliminate text overlapping, line clipping, and layout distortion.
  */
 
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
@@ -135,7 +136,6 @@ export function canEncodeWithFont(str, font) {
  */
 export function hasComplexUnicode(str) {
   if (!str) return false;
-  // Bengali: \u0980-\u09FF, Arabic: \u0600-\u06FF, Devanagari: \u0900-\u097F, CJK: \u4E00-\u9FFF, Emojis: \uD800-\uDFFF
   return /[\u0980-\u09FF\u0900-\u097F\u0600-\u06FF\u4E00-\u9FFF\uD800-\uDFFF]/.test(str);
 }
 
@@ -311,12 +311,6 @@ function wrapText(text, maxWidth, font, fontSize) {
 
 /**
  * Creates an SVG data URL for a text string that contains complex Unicode (e.g. Bengali).
- * @param {string} text
- * @param {number} fontSize
- * @param {string} colorHex
- * @param {boolean} isBold
- * @param {number} maxWidth
- * @returns {string} SVG data URL
  */
 function createUnicodeTextSvgDataUrl(text, fontSize, colorHex, isBold, maxWidth) {
   const safeText = text
@@ -347,6 +341,632 @@ const MARGINS = {
   wide: 54,
   normal: 40
 };
+
+/**
+ * Paged Document Layout Engine for PDF generation.
+ * Performs explicit block measurement and maintains layout state (`cursorY`) strictly based on actual rendered block heights.
+ */
+class PdfLayoutEngine {
+  constructor(pdfDoc, options = {}) {
+    this.pdfDoc = pdfDoc;
+    this.pageWidth = options.pageWidth;
+    this.pageHeight = options.pageHeight;
+    this.margin = options.margin;
+    this.contentWidth = this.pageWidth - this.margin * 2;
+
+    this.theme = options.theme;
+    this.isDark = options.isDark;
+    this.bgColor = options.bgColor;
+    this.textColor = options.textColor;
+    this.textColorHex = options.textColorHex;
+    this.mutedColor = options.mutedColor;
+    this.mutedColorHex = options.mutedColorHex;
+    this.primaryColor = options.primaryColor;
+    this.primaryColorHex = options.primaryColorHex;
+    this.userRoleColor = options.userRoleColor;
+    this.assistantRoleColor = options.assistantRoleColor;
+    this.codeBgColor = options.codeBgColor;
+    this.tableHeaderBg = options.tableHeaderBg;
+    this.borderColor = options.borderColor;
+
+    this.fontRegular = options.fontRegular;
+    this.fontBold = options.fontBold;
+    this.fontMono = options.fontMono;
+    this.fontSize = options.fontSize || 10;
+
+    this.pages = [];
+    this.currentPage = null;
+    this.cursorY = 0;
+
+    this.addPage();
+  }
+
+  addPage() {
+    const page = this.pdfDoc.addPage([this.pageWidth, this.pageHeight]);
+    if (this.isDark && this.bgColor) {
+      page.drawRectangle({
+        x: 0,
+        y: 0,
+        width: this.pageWidth,
+        height: this.pageHeight,
+        color: this.bgColor
+      });
+    }
+    this.pages.push(page);
+    this.currentPage = page;
+    this.cursorY = this.pageHeight - this.margin;
+    return page;
+  }
+
+  get availableHeight() {
+    return this.cursorY - this.margin;
+  }
+
+  hasSpace(height) {
+    return this.availableHeight >= height;
+  }
+
+  ensureSpace(height) {
+    if (!this.hasSpace(height)) {
+      this.addPage();
+      return true;
+    }
+    return false;
+  }
+
+  async drawTextLine(text, x, curY, size, font, color, colorHex, isBold = false) {
+    if (!text) return;
+    if (hasComplexUnicode(text)) {
+      try {
+        const svgData = createUnicodeTextSvgDataUrl(text, size, colorHex, isBold, this.contentWidth);
+        const convResult = await imageSourceToPngBytes(svgData);
+        if (convResult && convResult.bytes) {
+          const img = await this.pdfDoc.embedPng(convResult.bytes);
+          const fitted = fitDimensions(
+            convResult.width,
+            convResult.height,
+            this.contentWidth,
+            size * 1.8
+          );
+          this.currentPage.drawImage(img, {
+            x,
+            y: curY - fitted.height + 2,
+            width: fitted.width,
+            height: fitted.height
+          });
+          return;
+        }
+      } catch {
+        // fallback
+      }
+    }
+
+    const safeStr = safeWinAnsiText(text, font);
+    this.currentPage.drawText(safeStr, {
+      x,
+      y: curY,
+      size,
+      font,
+      color
+    });
+  }
+
+  // --- Block Measurements ---
+
+  measureHeading(block) {
+    const hSize =
+      block.level === 1 ? this.fontSize + 4 : block.level === 2 ? this.fontSize + 2.5 : this.fontSize + 1.5;
+    const hText = block.text || htmlToText(block.html) || '';
+    const lines = wrapText(hText, this.contentWidth, this.fontBold, hSize);
+    const lineHeight = hSize + 4;
+    const spaceBefore = 10;
+    const spaceAfter = 6;
+    const contentHeight = lines.length * lineHeight;
+    const totalHeight = spaceBefore + contentHeight + spaceAfter;
+    const keepWithNextMin = 35; // keep heading together with following paragraph lines
+    return { kind: 'heading', hSize, lines, lineHeight, spaceBefore, spaceAfter, contentHeight, totalHeight, keepWithNextMin };
+  }
+
+  measureParagraph(rawText) {
+    const text = rawText || '';
+    if (!text.trim()) return { kind: 'paragraph', lines: [], totalHeight: 0 };
+    const lines = wrapText(text, this.contentWidth, this.fontRegular, this.fontSize);
+    const lineHeight = this.fontSize + 4.5;
+    const spaceAfter = 7;
+    const contentHeight = lines.length * lineHeight;
+    const totalHeight = contentHeight + spaceAfter;
+    return { kind: 'paragraph', lines, lineHeight, contentHeight, spaceAfter, totalHeight };
+  }
+
+  measureCode(block) {
+    const rawLines = (block.code || '').split('\n');
+    const maxCodeWidth = this.contentWidth - 20;
+    const codeLines = [];
+    for (const rawLine of rawLines) {
+      const subLines = wrapCodeLine(rawLine, maxCodeWidth, this.fontMono, 8.5);
+      codeLines.push(...subLines);
+    }
+    const lineHeight = 13;
+    const paddingTopBottom = 8;
+    const spaceAfter = 10;
+    const contentHeight = codeLines.length * lineHeight;
+    const totalHeight = paddingTopBottom * 2 + contentHeight + spaceAfter;
+    return { kind: 'code', codeLines, lineHeight, paddingTopBottom, contentHeight, totalHeight, spaceAfter };
+  }
+
+  measureList(block) {
+    const items = block.items || [];
+    const measuredItems = [];
+    let totalHeight = 0;
+
+    if (items.length > 0) {
+      for (let idx = 0; idx < items.length; idx++) {
+        const item = items[idx];
+        const depth = item.depth || 0;
+        const isOrd = item.ordered !== undefined ? item.ordered : block.ordered;
+        const itemIdx = item.index !== undefined ? item.index : idx + 1;
+        const bullet = isOrd ? `${itemIdx}. ` : '* ';
+        const bulletWidth = this.fontBold.widthOfTextAtSize(bullet, this.fontSize);
+        const text = item.text || htmlToText(item.html);
+        const indentX = this.margin + 8 + depth * 16;
+        const availW = this.contentWidth - (8 + depth * 16) - bulletWidth - 4;
+        const lines = wrapText(text, availW, this.fontRegular, this.fontSize);
+        const lineHeight = this.fontSize + 4;
+        const itemH = lines.length * lineHeight + 3;
+        totalHeight += itemH;
+        measuredItems.push({ bullet, bulletWidth, text, indentX, lines, lineHeight, itemHeight: itemH });
+      }
+      totalHeight += 6;
+    } else {
+      const raw = block.text || htmlToText(block.html);
+      const lines = wrapText(raw, this.contentWidth, this.fontRegular, this.fontSize);
+      const lineHeight = this.fontSize + 4;
+      totalHeight = lines.length * lineHeight + 6;
+      measuredItems.push({ bullet: '', bulletWidth: 0, text: raw, indentX: this.margin, lines, lineHeight, itemHeight: totalHeight });
+    }
+    return { kind: 'list', items: measuredItems, totalHeight };
+  }
+
+  measureQuote(block) {
+    const raw = block.text || htmlToText(block.html);
+    const lines = wrapText(raw, this.contentWidth - 20, this.fontRegular, this.fontSize);
+    const lineHeight = this.fontSize + 4;
+    const contentHeight = lines.length * lineHeight;
+    const totalHeight = contentHeight + 14;
+    return { kind: 'quote', lines, lineHeight, contentHeight, totalHeight };
+  }
+
+  measureTable(block) {
+    const tableRows = normalizeTableRows(block);
+    if (tableRows.length === 0) return { kind: 'table', totalHeight: 0, measuredRows: [] };
+    const colWidths = computeColumnWidths(tableRows, this.contentWidth);
+    const cellFontSize = this.fontSize - 1;
+
+    const measuredRows = [];
+    let totalHeight = 0;
+
+    for (let rIdx = 0; rIdx < tableRows.length; rIdx++) {
+      const row = tableRows[rIdx];
+      const isHeader = rIdx === 0 || row.some((c) => c.isHeader);
+      const cellFont = isHeader ? this.fontBold : this.fontRegular;
+
+      const cellsWithLines = row.map((cell, cIdx) => {
+        const w = colWidths[cIdx] || 50;
+        const lines = wrapCellLines(cell.text, w - 10, (str) => {
+          try {
+            return cellFont.widthOfTextAtSize(safeWinAnsiText(str, cellFont), cellFontSize);
+          } catch {
+            return str.length * (cellFontSize * 0.55);
+          }
+        });
+        return { ...cell, lines, width: w };
+      });
+
+      const maxLines = Math.max(...cellsWithLines.map((c) => c.lines.length), 1);
+      const rowHeight = maxLines * (cellFontSize + 3) + 8;
+      totalHeight += rowHeight;
+      measuredRows.push({ isHeader, cellFont, cellFontSize, cells: cellsWithLines, rowHeight });
+    }
+    totalHeight += 10;
+    return { kind: 'table', colWidths, measuredRows, totalHeight };
+  }
+
+  // --- Block Renderers ---
+
+  async renderHeading(block) {
+    const m = this.measureHeading(block);
+    this.ensureSpace(m.totalHeight + m.keepWithNextMin);
+
+    this.cursorY -= m.spaceBefore;
+    for (const l of m.lines) {
+      await this.drawTextLine(
+        l,
+        this.margin,
+        this.cursorY - m.hSize,
+        m.hSize,
+        this.fontBold,
+        this.textColor,
+        this.textColorHex,
+        true
+      );
+      this.cursorY -= m.lineHeight;
+    }
+    this.cursorY -= m.spaceAfter;
+  }
+
+  async renderParagraphText(text) {
+    const m = this.measureParagraph(text);
+    if (m.lines.length === 0) return;
+
+    if (this.hasSpace(m.totalHeight)) {
+      for (const l of m.lines) {
+        await this.drawTextLine(
+          l,
+          this.margin,
+          this.cursorY - this.fontSize,
+          this.fontSize,
+          this.fontRegular,
+          this.textColor,
+          this.textColorHex,
+          false
+        );
+        this.cursorY -= m.lineHeight;
+      }
+      this.cursorY -= m.spaceAfter;
+    } else {
+      if (this.availableHeight < m.lineHeight * 2) {
+        this.addPage();
+      }
+      for (const l of m.lines) {
+        if (!this.hasSpace(m.lineHeight + 5)) {
+          this.addPage();
+        }
+        await this.drawTextLine(
+          l,
+          this.margin,
+          this.cursorY - this.fontSize,
+          this.fontSize,
+          this.fontRegular,
+          this.textColor,
+          this.textColorHex,
+          false
+        );
+        this.cursorY -= m.lineHeight;
+      }
+      this.cursorY -= m.spaceAfter;
+    }
+  }
+
+  async renderCode(block) {
+    const m = this.measureCode(block);
+    const pageContentHeight = this.pageHeight - this.margin * 2;
+
+    if (m.totalHeight <= this.availableHeight) {
+      const boxTop = this.cursorY;
+      const boxH = m.totalHeight - m.spaceAfter;
+      this.currentPage.drawRectangle({
+        x: this.margin,
+        y: boxTop - boxH,
+        width: this.contentWidth,
+        height: boxH,
+        color: this.codeBgColor
+      });
+
+      this.cursorY -= m.paddingTopBottom;
+      for (const line of m.codeLines) {
+        await this.drawTextLine(
+          line,
+          this.margin + 8,
+          this.cursorY - 9,
+          8.5,
+          this.fontMono,
+          this.textColor,
+          this.textColorHex,
+          false
+        );
+        this.cursorY -= m.lineHeight;
+      }
+      this.cursorY -= m.paddingTopBottom + m.spaceAfter;
+    } else if (m.totalHeight <= pageContentHeight) {
+      this.addPage();
+      await this.renderCode(block);
+    } else {
+      const lines = [...m.codeLines];
+      while (lines.length > 0) {
+        const availH = this.availableHeight;
+        if (availH < 40) {
+          this.addPage();
+        }
+        const availLines = Math.max(1, Math.floor((this.availableHeight - 20) / m.lineHeight));
+        const chunk = lines.splice(0, availLines);
+        const chunkH = chunk.length * m.lineHeight + m.paddingTopBottom * 2;
+
+        const boxTop = this.cursorY;
+        this.currentPage.drawRectangle({
+          x: this.margin,
+          y: boxTop - chunkH,
+          width: this.contentWidth,
+          height: chunkH,
+          color: this.codeBgColor
+        });
+
+        this.cursorY -= m.paddingTopBottom;
+        for (const line of chunk) {
+          await this.drawTextLine(
+            line,
+            this.margin + 8,
+            this.cursorY - 9,
+            8.5,
+            this.fontMono,
+            this.textColor,
+            this.textColorHex,
+            false
+          );
+          this.cursorY -= m.lineHeight;
+        }
+        this.cursorY -= m.paddingTopBottom + m.spaceAfter;
+      }
+    }
+  }
+
+  async renderList(block) {
+    const m = this.measureList(block);
+    if (m.totalHeight <= this.availableHeight) {
+      for (const item of m.items) {
+        if (item.bullet) {
+          this.currentPage.drawText(safeWinAnsiText(item.bullet, this.fontBold), {
+            x: item.indentX,
+            y: this.cursorY - this.fontSize,
+            size: this.fontSize,
+            font: this.fontBold,
+            color: this.primaryColor
+          });
+        }
+        for (const l of item.lines) {
+          await this.drawTextLine(
+            l,
+            item.indentX + item.bulletWidth + 4,
+            this.cursorY - this.fontSize,
+            this.fontSize,
+            this.fontRegular,
+            this.textColor,
+            this.textColorHex,
+            false
+          );
+          this.cursorY -= item.lineHeight;
+        }
+        this.cursorY -= 3;
+      }
+      this.cursorY -= 6;
+    } else {
+      for (const item of m.items) {
+        if (!this.hasSpace(item.itemHeight)) {
+          this.addPage();
+        }
+        if (item.bullet) {
+          this.currentPage.drawText(safeWinAnsiText(item.bullet, this.fontBold), {
+            x: item.indentX,
+            y: this.cursorY - this.fontSize,
+            size: this.fontSize,
+            font: this.fontBold,
+            color: this.primaryColor
+          });
+        }
+        for (const l of item.lines) {
+          if (!this.hasSpace(item.lineHeight + 4)) {
+            this.addPage();
+          }
+          await this.drawTextLine(
+            l,
+            item.indentX + item.bulletWidth + 4,
+            this.cursorY - this.fontSize,
+            this.fontSize,
+            this.fontRegular,
+            this.textColor,
+            this.textColorHex,
+            false
+          );
+          this.cursorY -= item.lineHeight;
+        }
+        this.cursorY -= 3;
+      }
+      this.cursorY -= 6;
+    }
+  }
+
+  async renderQuote(block) {
+    const m = this.measureQuote(block);
+    this.ensureSpace(m.totalHeight);
+
+    const blockH = m.contentHeight;
+    this.currentPage.drawLine({
+      start: { x: this.margin + 4, y: this.cursorY },
+      end: { x: this.margin + 4, y: this.cursorY - blockH },
+      thickness: 2.5,
+      color: this.primaryColor
+    });
+
+    for (const l of m.lines) {
+      await this.drawTextLine(
+        l,
+        this.margin + 16,
+        this.cursorY - this.fontSize,
+        this.fontSize,
+        this.fontRegular,
+        this.mutedColor,
+        this.mutedColorHex,
+        false
+      );
+      this.cursorY -= m.lineHeight;
+    }
+    this.cursorY -= 8;
+  }
+
+  async renderTable(block) {
+    const m = this.measureTable(block);
+    if (m.measuredRows.length === 0) return;
+
+    this.ensureSpace(Math.min(m.totalHeight, 100));
+
+    const headerRow = m.measuredRows.find((r) => r.isHeader) || m.measuredRows[0];
+
+    for (let rIdx = 0; rIdx < m.measuredRows.length; rIdx++) {
+      const row = m.measuredRows[rIdx];
+
+      if (!this.hasSpace(row.rowHeight)) {
+        this.addPage();
+        if (!row.isHeader && headerRow) {
+          await this.renderTableRow(headerRow, m.colWidths);
+        }
+      }
+
+      await this.renderTableRow(row, m.colWidths);
+    }
+    this.cursorY -= 10;
+  }
+
+  async renderTableRow(row, colWidths) {
+    if (row.isHeader) {
+      this.currentPage.drawRectangle({
+        x: this.margin,
+        y: this.cursorY - row.rowHeight,
+        width: this.contentWidth,
+        height: row.rowHeight,
+        color: this.tableHeaderBg
+      });
+    }
+
+    this.currentPage.drawLine({
+      start: { x: this.margin, y: this.cursorY - row.rowHeight },
+      end: { x: this.margin + this.contentWidth, y: this.cursorY - row.rowHeight },
+      thickness: 0.8,
+      color: this.borderColor
+    });
+
+    let currentX = this.margin;
+    for (let cIdx = 0; cIdx < row.cells.length; cIdx++) {
+      const cell = row.cells[cIdx];
+      const cellX = currentX + 5;
+      let lineY = this.cursorY - row.cellFontSize - 4;
+
+      for (const line of cell.lines) {
+        await this.drawTextLine(
+          line,
+          cellX,
+          lineY,
+          row.cellFontSize,
+          row.cellFont,
+          this.textColor,
+          this.textColorHex,
+          row.isHeader
+        );
+        lineY -= row.cellFontSize + 3;
+      }
+      currentX += cell.width;
+    }
+    this.cursorY -= row.rowHeight;
+  }
+
+  async renderMath(block) {
+    try {
+      const svgStr = renderMathToSvg(block.tex || '', block.displayMode, this.textColorHex);
+      const svgData = `data:image/svg+xml;utf8,${encodeURIComponent(svgStr)}`;
+      const convResult = await imageSourceToPngBytes(svgData);
+
+      if (convResult && convResult.bytes) {
+        const mathImg = await this.pdfDoc.embedPng(convResult.bytes);
+        const maxH = block.displayMode ? 100 : 35;
+        const fitted = fitDimensions(
+          convResult.width,
+          convResult.height,
+          this.contentWidth,
+          maxH
+        );
+
+        const neededHeight = fitted.height + 14;
+        this.ensureSpace(neededHeight);
+
+        const mathX = block.displayMode
+          ? this.margin + Math.max(0, (this.contentWidth - fitted.width) / 2)
+          : this.margin + 8;
+
+        this.currentPage.drawImage(mathImg, {
+          x: mathX,
+          y: this.cursorY - fitted.height - 4,
+          width: fitted.width,
+          height: fitted.height
+        });
+        this.cursorY -= fitted.height + 12;
+        return;
+      }
+    } catch {
+      // fallback
+    }
+
+    this.ensureSpace(20);
+    await this.drawTextLine(
+      block.tex,
+      this.margin + 10,
+      this.cursorY - 12,
+      this.fontSize,
+      this.fontRegular,
+      this.primaryColor,
+      this.primaryColorHex,
+      false
+    );
+    this.cursorY -= 20;
+  }
+
+  async renderImage(block) {
+    try {
+      const imgSrc = block.dataUrl || block.src;
+      const convResult = await imageSourceToPngBytes(imgSrc);
+
+      if (convResult && convResult.bytes) {
+        let embeddedImg = null;
+        if (convResult.isPng) {
+          embeddedImg = await this.pdfDoc.embedPng(convResult.bytes);
+        } else {
+          embeddedImg = await this.pdfDoc.embedJpg(convResult.bytes);
+        }
+
+        if (embeddedImg) {
+          const fitted = fitDimensions(
+            convResult.width,
+            convResult.height,
+            this.contentWidth,
+            380
+          );
+
+          this.ensureSpace(fitted.height + 15);
+          this.currentPage.drawImage(embeddedImg, {
+            x: this.margin + (this.contentWidth - fitted.width) / 2,
+            y: this.cursorY - fitted.height,
+            width: fitted.width,
+            height: fitted.height
+          });
+          this.cursorY -= fitted.height + 15;
+          return;
+        }
+      }
+    } catch (imgErr) {
+      console.warn('[PDF Exporter] Image embed error:', imgErr);
+    }
+
+    this.ensureSpace(20);
+    await this.drawTextLine(
+      `[Image: ${block.alt || 'Chat Image'}]`,
+      this.margin,
+      this.cursorY - 11,
+      this.fontSize - 1,
+      this.fontRegular,
+      this.mutedColor,
+      this.mutedColorHex,
+      false
+    );
+    this.cursorY -= 15;
+  }
+}
 
 /**
  * Generates a clean vector PDF with selectable text, rendered math formulas,
@@ -392,143 +1012,97 @@ export async function exportConversation(originalConversation, options = {}) {
 
   const [pageWidth, pageHeight] = PAGE_FORMATS[pageFormat.toLowerCase()] || PAGE_FORMATS.a4;
   const margin = MARGINS[marginOpt.toLowerCase()] || MARGINS.normal;
-  const contentWidth = pageWidth - margin * 2;
 
-  let page = pdfDoc.addPage([pageWidth, pageHeight]);
-  if (isDark) {
-    page.drawRectangle({
-      x: 0,
-      y: 0,
-      width: pageWidth,
-      height: pageHeight,
-      color: bgColor
-    });
-  }
-
-  let y = pageHeight - margin;
-
-  function ensureSpace(neededHeight) {
-    if (y - neededHeight < margin) {
-      page = pdfDoc.addPage([pageWidth, pageHeight]);
-      if (isDark) {
-        page.drawRectangle({
-          x: 0,
-          y: 0,
-          width: pageWidth,
-          height: pageHeight,
-          color: bgColor
-        });
-      }
-      y = pageHeight - margin;
-    }
-  }
-
-  /**
-   * Draws a line of text, automatically using high-DPI image embedding for complex Unicode (e.g. Bengali).
-   */
-  async function drawTextLine(text, x, curY, size, font, color, colorHex, isBold = false) {
-    if (!text) return;
-    if (hasComplexUnicode(text)) {
-      try {
-        const svgData = createUnicodeTextSvgDataUrl(text, size, colorHex, isBold, contentWidth);
-        const convResult = await imageSourceToPngBytes(svgData);
-        if (convResult && convResult.bytes) {
-          const img = await pdfDoc.embedPng(convResult.bytes);
-          const fitted = fitDimensions(
-            convResult.width,
-            convResult.height,
-            contentWidth,
-            size * 1.8
-          );
-          page.drawImage(img, {
-            x,
-            y: curY - fitted.height + 2,
-            width: fitted.width,
-            height: fitted.height
-          });
-          return;
-        }
-      } catch {
-        // fallback to vector text
-      }
-    }
-
-    const safeStr = safeWinAnsiText(text, font);
-    page.drawText(safeStr, {
-      x,
-      y: curY,
-      size,
-      font,
-      color
-    });
-  }
+  const layoutEngine = new PdfLayoutEngine(pdfDoc, {
+    pageWidth,
+    pageHeight,
+    margin,
+    theme: resolvedTheme,
+    isDark,
+    bgColor,
+    textColor,
+    textColorHex,
+    mutedColor,
+    mutedColorHex,
+    primaryColor,
+    primaryColorHex,
+    userRoleColor,
+    assistantRoleColor,
+    codeBgColor,
+    tableHeaderBg,
+    borderColor,
+    fontRegular,
+    fontBold,
+    fontMono,
+    fontSize
+  });
 
   // Draw Title
-  ensureSpace(45);
-  await drawTextLine(
+  layoutEngine.ensureSpace(45);
+  await layoutEngine.drawTextLine(
     conv.title || 'Z.ai Conversation',
     margin,
-    y - 22,
+    layoutEngine.cursorY - 22,
     18,
     fontBold,
     textColor,
     textColorHex,
     true
   );
-  y -= 32;
+  layoutEngine.cursorY -= 32;
 
   // Metadata Header
   const dateStr = new Date(conv.createdAt).toLocaleString();
-  await drawTextLine(
+  await layoutEngine.drawTextLine(
     `Model: ${conv.model}  |  Date: ${dateStr}`,
     margin,
-    y - 10,
+    layoutEngine.cursorY - 10,
     9,
     fontRegular,
     mutedColor,
     mutedColorHex,
     false
   );
-  y -= 22;
+  layoutEngine.cursorY -= 22;
 
   // Horizontal divider
-  page.drawLine({
-    start: { x: margin, y },
-    end: { x: pageWidth - margin, y },
+  layoutEngine.currentPage.drawLine({
+    start: { x: margin, y: layoutEngine.cursorY },
+    end: { x: pageWidth - margin, y: layoutEngine.cursorY },
     thickness: 1,
     color: borderColor
   });
-  y -= 24;
+  layoutEngine.cursorY -= 24;
 
   // Table of Contents if enabled
   if (includeToc && Array.isArray(conv.messages) && conv.messages.length > 0) {
-    ensureSpace(40);
-    page.drawText('Table of Contents', {
+    layoutEngine.ensureSpace(40);
+    layoutEngine.currentPage.drawText('Table of Contents', {
       x: margin,
-      y: y - 12,
+      y: layoutEngine.cursorY - 12,
       size: 13,
       font: fontBold,
       color: primaryColor
     });
-    y -= 22;
+    layoutEngine.cursorY -= 22;
 
     for (let i = 0; i < Math.min(conv.messages.length, 25); i++) {
       const msg = conv.messages[i];
       const snippet = (msg.text || '').substring(0, 45).replace(/\n/g, ' ');
-      ensureSpace(14);
-      await drawTextLine(
+      layoutEngine.ensureSpace(14);
+      await layoutEngine.drawTextLine(
         `#${i + 1} [${msg.role}]: ${snippet}...`,
         margin + 10,
-        y - 10,
+        layoutEngine.cursorY - 10,
         8.5,
         fontRegular,
         mutedColor,
         mutedColorHex,
         false
       );
-      y -= 14;
+      layoutEngine.cursorY -= 14;
     }
-    y -= 16;
+    layoutEngine.cursorY -= 16;
   }
 
   // Render Messages
@@ -536,438 +1110,46 @@ export async function exportConversation(originalConversation, options = {}) {
     const isUser = msg.role === 'user';
     const roleLabel = isUser ? 'You' : conv.model || 'Z.ai Assistant';
 
-    ensureSpace(32);
+    // Keep speaker header together with first block content
+    layoutEngine.ensureSpace(56);
 
     // Speaker Header
-    page.drawText(safeWinAnsiText(roleLabel, fontBold), {
+    layoutEngine.currentPage.drawText(safeWinAnsiText(roleLabel, fontBold), {
       x: margin,
-      y: y - 12,
+      y: layoutEngine.cursorY - 12,
       size: fontSize + 2,
       font: fontBold,
       color: isUser ? userRoleColor : assistantRoleColor
     });
-    y -= 22;
+    layoutEngine.cursorY -= 22;
 
     if (Array.isArray(msg.blocks) && msg.blocks.length > 0) {
       for (const block of msg.blocks) {
         if (block.kind === 'heading') {
-          const hSize =
-            block.level === 1 ? fontSize + 4 : block.level === 2 ? fontSize + 2.5 : fontSize + 1.5;
-          const hText = block.text || block.html?.replace(/<[^>]*>/g, '') || '';
-          const lines = wrapText(hText, contentWidth, fontBold, hSize);
-
-          ensureSpace(lines.length * (hSize + 4) + 14);
-          y -= 8;
-          for (const l of lines) {
-            await drawTextLine(
-              l,
-              margin,
-              y - hSize,
-              hSize,
-              fontBold,
-              textColor,
-              textColorHex,
-              true
-            );
-            y -= hSize + 4;
-          }
-          y -= 6;
+          await layoutEngine.renderHeading(block);
         } else if (block.kind === 'list') {
-          const items = block.items || [];
-          if (items.length > 0) {
-            for (let idx = 0; idx < items.length; idx++) {
-              const item = items[idx];
-              const depth = item.depth || 0;
-              const isOrd = item.ordered !== undefined ? item.ordered : block.ordered;
-              const itemIdx = item.index !== undefined ? item.index : idx + 1;
-              const bullet = isOrd ? `${itemIdx}. ` : '* ';
-              const bulletWidth = fontBold.widthOfTextAtSize(bullet, fontSize);
-              const text = item.text || htmlToText(item.html);
-              const indentX = margin + 8 + depth * 16;
-              const lines = wrapText(
-                text,
-                contentWidth - bulletWidth - 8 - depth * 16,
-                fontRegular,
-                fontSize
-              );
-
-              ensureSpace(lines.length * (fontSize + 4) + 6);
-              if (lines.length > 0) {
-                page.drawText(safeWinAnsiText(bullet, fontBold), {
-                  x: indentX,
-                  y: y - fontSize,
-                  size: fontSize,
-                  font: fontBold,
-                  color: primaryColor
-                });
-
-                for (let li = 0; li < lines.length; li++) {
-                  await drawTextLine(
-                    lines[li],
-                    indentX + bulletWidth + 4,
-                    y - fontSize,
-                    fontSize,
-                    fontRegular,
-                    textColor,
-                    textColorHex,
-                    false
-                  );
-                  y -= fontSize + 4;
-                }
-              }
-              y -= 3;
-            }
-            y -= 6;
-          } else {
-            const raw = block.text || htmlToText(block.html);
-            const lines = wrapText(raw, contentWidth, fontRegular, fontSize);
-            for (const l of lines) {
-              ensureSpace(fontSize + 5);
-              await drawTextLine(
-                l,
-                margin,
-                y - fontSize,
-                fontSize,
-                fontRegular,
-                textColor,
-                textColorHex,
-                false
-              );
-              y -= fontSize + 4;
-            }
-            y -= 6;
-          }
+          await layoutEngine.renderList(block);
         } else if (block.kind === 'quote') {
-          const raw = block.text || htmlToText(block.html);
-          const lines = wrapText(raw, contentWidth - 20, fontRegular, fontSize);
-          const blockH = lines.length * (fontSize + 4) + 6;
-
-          ensureSpace(blockH + 8);
-          page.drawLine({
-            start: { x: margin + 4, y },
-            end: { x: margin + 4, y: y - blockH },
-            thickness: 2.5,
-            color: primaryColor
-          });
-
-          for (const l of lines) {
-            await drawTextLine(
-              l,
-              margin + 16,
-              y - fontSize,
-              fontSize,
-              fontRegular,
-              mutedColor,
-              mutedColorHex,
-              false
-            );
-            y -= fontSize + 4;
-          }
-          y -= 8;
+          await layoutEngine.renderQuote(block);
         } else if (block.kind === 'code') {
-          // Wrap long code lines PRESERVING EXACT WHITESPACE & INDENTATION
-          const rawLines = (block.code || '').split('\n');
-          const maxCodeWidth = contentWidth - 20;
-          const codeLines = [];
-
-          for (const rawLine of rawLines) {
-            const subLines = wrapCodeLine(rawLine, maxCodeWidth, fontMono, 8.5);
-            codeLines.push(...subLines);
-          }
-
-          const blockHeight = codeLines.length * 13 + 16;
-          ensureSpace(Math.min(blockHeight, 150));
-
-          // Draw code background box
-          const boxTop = y;
-          const boxH = Math.min(blockHeight, y - margin);
-          page.drawRectangle({
-            x: margin,
-            y: boxTop - boxH,
-            width: contentWidth,
-            height: boxH,
-            color: codeBgColor
-          });
-
-          y -= 8;
-          for (const line of codeLines) {
-            ensureSpace(14);
-            await drawTextLine(
-              line,
-              margin + 8,
-              y - 9,
-              8.5,
-              fontMono,
-              textColor,
-              textColorHex,
-              false
-            );
-            y -= 13;
-          }
-          y -= 10;
+          await layoutEngine.renderCode(block);
         } else if (block.kind === 'table') {
-          // Dynamic content-aware table without truncation
-          const tableRows = normalizeTableRows(block);
-          if (tableRows.length > 0) {
-            const colWidths = computeColumnWidths(tableRows, contentWidth);
-
-            ensureSpace(35);
-
-            for (let rIdx = 0; rIdx < tableRows.length; rIdx++) {
-              const row = tableRows[rIdx];
-              const isHeader = rIdx === 0 || row.some((c) => c.isHeader);
-              const cellFont = isHeader ? fontBold : fontRegular;
-              const cellFontSize = fontSize - 1;
-
-              // Compute wrapped lines for each cell in this row
-              const rowCellsWithLines = row.map((cell, cIdx) => {
-                const w = colWidths[cIdx] || 50;
-                const lines = wrapCellLines(cell.text, w - 10, (str) => {
-                  try {
-                    return cellFont.widthOfTextAtSize(safeWinAnsiText(str, cellFont), cellFontSize);
-                  } catch {
-                    return str.length * (cellFontSize * 0.55);
-                  }
-                });
-                return { ...cell, lines, width: w };
-              });
-
-              // Dynamic content-aware row height (never fixed at 22px)
-              const maxLines = Math.max(...rowCellsWithLines.map((c) => c.lines.length), 1);
-              const rowHeight = maxLines * (cellFontSize + 3) + 8;
-
-              // Check page boundary. If row doesn't fit, add page and repeat header
-              if (y - rowHeight < margin) {
-                ensureSpace(rowHeight + 10);
-                if (!isHeader && tableRows[0]) {
-                  // Re-draw header row on new page
-                  const headerHeight = 22;
-                  page.drawRectangle({
-                    x: margin,
-                    y: y - headerHeight,
-                    width: contentWidth,
-                    height: headerHeight,
-                    color: tableHeaderBg
-                  });
-                  let hx = margin;
-                  for (let hIdx = 0; hIdx < tableRows[0].length; hIdx++) {
-                    const hCell = tableRows[0][hIdx];
-                    const hw = colWidths[hIdx] || 50;
-                    await drawTextLine(
-                      hCell.text,
-                      hx + 5,
-                      y - 14,
-                      cellFontSize,
-                      fontBold,
-                      textColor,
-                      textColorHex,
-                      true
-                    );
-                    hx += hw;
-                  }
-                  y -= headerHeight;
-                }
-              }
-
-              // Background for header
-              if (isHeader) {
-                page.drawRectangle({
-                  x: margin,
-                  y: y - rowHeight,
-                  width: contentWidth,
-                  height: rowHeight,
-                  color: tableHeaderBg
-                });
-              }
-
-              // Cell bottom border
-              page.drawLine({
-                start: { x: margin, y: y - rowHeight },
-                end: { x: margin + contentWidth, y: y - rowHeight },
-                thickness: 0.8,
-                color: borderColor
-              });
-
-              // Draw cell content
-              let currentX = margin;
-              for (let cIdx = 0; cIdx < rowCellsWithLines.length; cIdx++) {
-                const cell = rowCellsWithLines[cIdx];
-                const cellX = currentX + 5;
-                let lineY = y - cellFontSize - 4;
-
-                for (const line of cell.lines) {
-                  await drawTextLine(
-                    line,
-                    cellX,
-                    lineY,
-                    cellFontSize,
-                    cellFont,
-                    textColor,
-                    textColorHex,
-                    isHeader
-                  );
-                  lineY -= cellFontSize + 3;
-                }
-
-                currentX += cell.width;
-              }
-
-              y -= rowHeight;
-            }
-            y -= 10;
-          }
+          await layoutEngine.renderTable(block);
         } else if (block.kind === 'math') {
-          // Render math as crisp high-DPI equation image (NEVER output [Formula: ...])
-          try {
-            const svgStr = renderMathToSvg(block.tex || '', block.displayMode, textColorHex);
-            const svgData = `data:image/svg+xml;utf8,${encodeURIComponent(svgStr)}`;
-            const convResult = await imageSourceToPngBytes(svgData);
-
-            if (convResult && convResult.bytes) {
-              const mathImg = await pdfDoc.embedPng(convResult.bytes);
-              const fitted = fitDimensions(
-                convResult.width,
-                convResult.height,
-                contentWidth,
-                block.displayMode ? 100 : 35
-              );
-
-              ensureSpace(fitted.height + 14);
-              const mathX = block.displayMode
-                ? margin + Math.max(0, (contentWidth - fitted.width) / 2)
-                : margin + 8;
-
-              page.drawImage(mathImg, {
-                x: mathX,
-                y: y - fitted.height - 4,
-                width: fitted.width,
-                height: fitted.height
-              });
-              y -= fitted.height + 12;
-            } else {
-              // Graceful clean math representation if image embedding unavailable
-              ensureSpace(20);
-              await drawTextLine(
-                block.tex,
-                margin + 10,
-                y - 12,
-                fontSize,
-                fontRegular,
-                primaryColor,
-                primaryColorHex,
-                false
-              );
-              y -= 20;
-            }
-          } catch (mErr) {
-            console.warn('[PDF-Vector] Math image error:', mErr);
-            ensureSpace(20);
-            await drawTextLine(
-              block.tex,
-              margin + 10,
-              y - 12,
-              fontSize,
-              fontRegular,
-              primaryColor,
-              primaryColorHex,
-              false
-            );
-            y -= 20;
-          }
+          await layoutEngine.renderMath(block);
         } else if (block.kind === 'image' && (block.src || block.dataUrl)) {
-          // Embed image preserving intrinsic aspect ratio without stretching
-          try {
-            const imgSrc = block.dataUrl || block.src;
-            const convResult = await imageSourceToPngBytes(imgSrc);
-
-            if (convResult && convResult.bytes) {
-              let embeddedImg = null;
-              if (convResult.isPng) {
-                embeddedImg = await pdfDoc.embedPng(convResult.bytes);
-              } else {
-                embeddedImg = await pdfDoc.embedJpg(convResult.bytes);
-              }
-
-              if (embeddedImg) {
-                const fitted = fitDimensions(
-                  convResult.width,
-                  convResult.height,
-                  contentWidth,
-                  380
-                );
-
-                ensureSpace(fitted.height + 15);
-                page.drawImage(embeddedImg, {
-                  x: margin + (contentWidth - fitted.width) / 2, // Centered
-                  y: y - fitted.height,
-                  width: fitted.width,
-                  height: fitted.height
-                });
-                y -= fitted.height + 15;
-              }
-            }
-          } catch (imgErr) {
-            console.warn('[PDF Exporter] Failed to embed image:', imgErr);
-            ensureSpace(20);
-            await drawTextLine(
-              `[Image: ${block.alt || 'Chat Image'}]`,
-              margin,
-              y - 11,
-              fontSize - 1,
-              fontRegular,
-              mutedColor,
-              mutedColorHex,
-              false
-            );
-            y -= 15;
-          }
+          await layoutEngine.renderImage(block);
         } else {
-          // Paragraph / Text / Other
           const raw = block.text || htmlToText(block.html);
-          if (raw.trim()) {
-            const lines = wrapText(raw, contentWidth, fontRegular, fontSize);
-            for (const l of lines) {
-              ensureSpace(fontSize + 5);
-              await drawTextLine(
-                l,
-                margin,
-                y - fontSize,
-                fontSize,
-                fontRegular,
-                textColor,
-                textColorHex,
-                false
-              );
-              y -= fontSize + 4.5;
-            }
-            y -= 7;
-          }
+          await layoutEngine.renderParagraphText(raw);
         }
       }
     } else {
-      // Fallback message text
       const raw = msg.text || '';
-      if (raw.trim()) {
-        const lines = wrapText(raw, contentWidth, fontRegular, fontSize);
-        for (const l of lines) {
-          ensureSpace(fontSize + 5);
-          await drawTextLine(
-            l,
-            margin,
-            y - fontSize,
-            fontSize,
-            fontRegular,
-            textColor,
-            textColorHex,
-            false
-          );
-          y -= fontSize + 4.5;
-        }
-        y -= 7;
-      }
+      await layoutEngine.renderParagraphText(raw);
     }
 
-    y -= 14; // Gap between speaker messages
+    layoutEngine.cursorY -= 14; // Gap between speaker messages
   }
 
   // Draw headers, footers, and page numbers across all pages
@@ -976,16 +1158,14 @@ export async function exportConversation(originalConversation, options = {}) {
     const p = pdfDoc.getPage(i);
 
     if (headerText) {
-      await drawTextLine(
-        headerText,
-        margin,
-        pageHeight - margin / 2,
-        8,
-        fontRegular,
-        mutedColor,
-        mutedColorHex,
-        false
-      );
+      const safeHeader = safeWinAnsiText(headerText, fontRegular);
+      p.drawText(safeHeader, {
+        x: margin,
+        y: pageHeight - margin / 2,
+        size: 8,
+        font: fontRegular,
+        color: mutedColor
+      });
     }
 
     const pageNumberText = `Page ${i + 1} of ${totalPages}`;
@@ -999,16 +1179,14 @@ export async function exportConversation(originalConversation, options = {}) {
     });
 
     if (footerText) {
-      await drawTextLine(
-        footerText,
-        margin,
-        margin / 2,
-        8,
-        fontRegular,
-        mutedColor,
-        mutedColorHex,
-        false
-      );
+      const safeFooter = safeWinAnsiText(footerText, fontRegular);
+      p.drawText(safeFooter, {
+        x: margin,
+        y: margin / 2,
+        size: 8,
+        font: fontRegular,
+        color: mutedColor
+      });
     }
   }
 

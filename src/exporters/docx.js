@@ -106,6 +106,7 @@ async function createBlocksDocx(msg, modelName) {
   items.push(
     new Paragraph({
       heading: HeadingLevel.HEADING_2,
+      keepWithNext: true,
       spacing: { before: 480, after: 200 },
       children: [
         new TextRun({
@@ -133,6 +134,7 @@ async function createBlocksDocx(msg, modelName) {
         items.push(
           new Paragraph({
             heading: hLevel,
+            keepWithNext: true,
             spacing: { before: 360, after: 180 },
             children: parseHtmlToTextRuns(block.html || block.text)
           })

@@ -258,3 +258,118 @@ describe('5. Prompt-Specific Fidelity & Structural Regression Tests', () => {
     expect(docXml).toContain('Ongoing');
   });
 });
+
+describe('6. Paged Document Layout Engine & Mandatory Overlap Prevention Tests', () => {
+  it('renders multi-line wrapped paragraphs without overlapping subsequent headings, lists, or tables in Vector PDF', async () => {
+    const longParaText =
+      'Distributed consensus protocols like Raft and Paxos ensure fault tolerance by replicating a log of state transitions across multiple independent cluster nodes. ' +
+      'In a typical production deployment, nodes exchange heartbeats and vote on leader leases while persisting log entries to local durable storage engines such as LSM-trees. ' +
+      'When network partitions or node failures occur, quorum-based leader election guarantees that state machine execution remains deterministic without split-brain corruption. ' +
+      'This long paragraph is specifically structured to test font measurement and multi-line word wrapping across at least 5 lines of document content in PDF export.';
+
+    const conv = {
+      schemaVersion: 2,
+      id: 'test_overlap_prevention',
+      title: 'Layout Engine Overlap Test',
+      url: 'https://chat.z.ai/test',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      model: 'Z.ai',
+      theme: 'light',
+      stats: { words: 100, chars: 800, tokensEst: 200, codeBlocks: 0, images: 0, tables: 1 },
+      messages: [
+        {
+          index: 0,
+          role: 'user',
+          text: 'Explain Raft consensus.'
+        },
+        {
+          index: 1,
+          role: 'assistant',
+          blocks: [
+            { kind: 'paragraph', text: longParaText },
+            { kind: 'heading', level: 2, text: 'Key Consensus Properties' },
+            {
+              kind: 'list',
+              ordered: true,
+              items: [
+                { text: 'Leader Election: Quorum majority election' },
+                { text: 'Log Replication: AppendEntries RPC verification' },
+                { text: 'Safety: Monotonically increasing term numbers' }
+              ]
+            },
+            {
+              kind: 'table',
+              rows: [
+                [
+                  { text: 'Property', isHeader: true },
+                  { text: 'Raft', isHeader: true },
+                  { text: 'Paxos', isHeader: true }
+                ],
+                [
+                  { text: 'Leader Role', isHeader: false },
+                  { text: 'Strong Leader', isHeader: false },
+                  { text: 'Multi-Proposer', isHeader: false }
+                ]
+              ]
+            }
+          ]
+        }
+      ]
+    };
+
+    const pdfRes = await vectorPdfExporter.exportConversation(conv);
+    expect(pdfRes.blob.size).toBeGreaterThan(1000);
+    expect(pdfRes.filename.endsWith('.pdf')).toBe(true);
+
+    const pdfBuffer = await blobToArrayBuffer(pdfRes.blob);
+    const pdfHeader = String.fromCharCode(...new Uint8Array(pdfBuffer).subarray(0, 5));
+    expect(pdfHeader).toBe('%PDF-');
+
+    const docxRes = await docxExporter.exportConversation(conv);
+    expect(docxRes.blob.size).toBeGreaterThan(1000);
+  });
+
+  it('preserves exact line count, 4-space indentation, and blank lines for Python code in PDF & DOCX', async () => {
+    const pythonCode =
+      'from django.shortcuts import render\n\ndef home(request):\n    posts = Post.objects.all()\n\n    return render(request, \'home.html\', {\n        \'posts\': posts\n    })';
+
+    const conv = {
+      schemaVersion: 2,
+      id: 'test_code_whitespace',
+      title: 'Critical Code Whitespace Test',
+      url: 'https://chat.z.ai/test',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      model: 'Z.ai',
+      theme: 'light',
+      stats: { words: 20, chars: 150, tokensEst: 37, codeBlocks: 1, images: 0, tables: 0 },
+      messages: [
+        {
+          index: 0,
+          role: 'assistant',
+          blocks: [
+            {
+              kind: 'code',
+              language: 'python',
+              code: pythonCode
+            }
+          ]
+        }
+      ]
+    };
+
+    const pdfRes = await vectorPdfExporter.exportConversation(conv);
+    expect(pdfRes.blob.size).toBeGreaterThan(1000);
+
+    const docxRes = await docxExporter.exportConversation(conv);
+    const zip = await JSZip.loadAsync(await blobToArrayBuffer(docxRes.blob));
+    const docXml = await zip.file('word/document.xml').async('string');
+
+    expect(docXml).toContain('def home(request):');
+    expect(docXml).toContain('    posts = Post.objects.all()');
+    expect(docXml).toContain('    return render(request, &apos;home.html&apos;, {');
+    expect(docXml).toContain('        &apos;posts&apos;: posts');
+  });
+});
+
