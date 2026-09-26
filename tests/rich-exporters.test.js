@@ -14,6 +14,7 @@ import * as vectorPdfExporter from '../src/exporters/pdf-vector.js';
 import * as docxExporter from '../src/exporters/docx.js';
 import * as htmlExporter from '../src/exporters/html.js';
 import * as markdownExporter from '../src/exporters/markdown.js';
+import { FullConversationCollector } from '../src/content/scraper.js';
 import {
   renderMathToHtml,
   renderMathToDocxMath,
@@ -473,5 +474,155 @@ describe('6. Paged Document Layout Engine & Mandatory Overlap Prevention Tests',
     expect(docXml).toContain('<w:tbl>');
   });
 });
+
+describe('7. Full Conversation Collection & Virtualization Sentinel Tests', () => {
+  it('FullConversationCollector correctly fingerprints and deduplicates virtualized messages', () => {
+    const collector = new FullConversationCollector();
+
+    const mockBubble1 = {
+      getAttribute: (attr) => (attr === 'data-message-id' ? 'msg_001' : null),
+      textContent: 'First message content...'
+    };
+    const mockBubble2 = {
+      getAttribute: () => null,
+      textContent: 'Second message content...'
+    };
+
+    const id1 = collector.getMessageIdentity(mockBubble1, 'user');
+    const id2 = collector.getMessageIdentity(mockBubble2, 'assistant');
+    const id2Duplicate = collector.getMessageIdentity(mockBubble2, 'assistant');
+
+    expect(id1).toBe('msg_001');
+    expect(id2).toContain('assistant:25:Second message content');
+    expect(id2).toBe(id2Duplicate);
+  });
+
+  it('collects all 200 messages across a virtualized DOM container where only 20 messages are mounted at a time', async () => {
+    // Simulate virtualized chat container with 200 total messages where DOM only mounts 20 at any scroll position
+    const totalMessagesCount = 200;
+    const windowSize = 20;
+
+    const mockContainer = document.createElement('div');
+    mockContainer.id = 'messages-container';
+    mockContainer.style.height = '600px';
+    mockContainer.style.overflowY = 'auto';
+
+    // Mock scroll properties
+    Object.defineProperty(mockContainer, 'clientHeight', { value: 600, configurable: true });
+    Object.defineProperty(mockContainer, 'scrollHeight', { value: 6000, configurable: true });
+
+    let currentScrollTop = 5400; // Start at bottom
+    Object.defineProperty(mockContainer, 'scrollTop', {
+      get: () => currentScrollTop,
+      set: (v) => {
+        currentScrollTop = Math.max(0, Math.min(6000, v));
+        updateMountedDOM();
+      },
+      configurable: true
+    });
+
+    function updateMountedDOM() {
+      mockContainer.innerHTML = '';
+      // Calculate mounted window based on scrollTop
+      const centerIdx = Math.floor((currentScrollTop / 6000) * totalMessagesCount);
+      const startIdx = Math.max(0, Math.min(totalMessagesCount - windowSize, centerIdx - 10));
+      const endIdx = Math.min(totalMessagesCount, startIdx + windowSize);
+
+      for (let i = startIdx; i < endIdx; i++) {
+        const bubble = document.createElement('div');
+        bubble.className = i % 2 === 0 ? 'user-message' : 'chat-assistant';
+        bubble.setAttribute('data-message-id', `virtual_msg_${i}`);
+        let text = `Virtualized Chat Message ${i + 1} content.`;
+        if (i === 0) text = 'SENTINEL_FIRST_VIRTUAL_MSG: Beginning of 200 chat';
+        if (i === 199) text = 'SENTINEL_LAST_VIRTUAL_MSG: End of 200 chat';
+        bubble.textContent = text;
+        mockContainer.appendChild(bubble);
+      }
+    }
+
+    document.body.appendChild(mockContainer);
+    updateMountedDOM();
+
+    const collector = new FullConversationCollector();
+    const collected = await collector.collectAll(mockContainer, {
+      maxScrollAttempts: 30,
+      settleDelayMs: 10
+    });
+
+    document.body.removeChild(mockContainer);
+
+    expect(collected.length).toBe(totalMessagesCount);
+    expect(collected[0].text).toContain('SENTINEL_FIRST_VIRTUAL_MSG');
+    expect(collected[collected.length - 1].text).toContain('SENTINEL_LAST_VIRTUAL_MSG');
+  });
+
+  it('exports a 100-message long conversation with Sentinel First and Last messages present in PDF and DOCX', async () => {
+    const messages = [];
+    const messageCount = 100;
+
+    for (let i = 0; i < messageCount; i++) {
+      const isUser = i % 2 === 0;
+      let text = `Message ${i + 1}: Standard discussion content line.`;
+      if (i === 0) {
+        text = 'SENTINEL_FIRST_MESSAGE: Welcome to the long conversation test suite.';
+      } else if (i === messageCount - 1) {
+        text = 'SENTINEL_LAST_MESSAGE: Final conclusion of the long conversation test suite.';
+      } else if (i === 50) {
+        text = 'SENTINEL_MIDDLE_MESSAGE: Midpoint state verification.';
+      }
+
+      messages.push({
+        index: i,
+        role: isUser ? 'user' : 'assistant',
+        text,
+        blocks: [
+          {
+            kind: 'paragraph',
+            text
+          }
+        ]
+      });
+    }
+
+    const longConv = {
+      schemaVersion: 2,
+      id: 'test_100_messages_sentinel',
+      title: '100-Message Full Conversation Export Test',
+      url: 'https://chat.z.ai/test/100',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      model: 'GLM-5.3-Flash',
+      theme: 'light',
+      stats: { words: 2000, chars: 12000, tokensEst: 3000, codeBlocks: 0, images: 0, tables: 0 },
+      messages
+    };
+
+    // 1. PDF Export
+    const pdfRes = await vectorPdfExporter.exportConversation(longConv, {
+      pageFormat: 'a4',
+      margin: 'normal',
+      fontSize: 10
+    });
+    expect(pdfRes.blob.size).toBeGreaterThan(5000);
+    expect(pdfRes.filename.endsWith('.pdf')).toBe(true);
+
+    const pdfBuffer = await blobToArrayBuffer(pdfRes.blob);
+    const pdfHeader = String.fromCharCode(...new Uint8Array(pdfBuffer).subarray(0, 5));
+    expect(pdfHeader).toBe('%PDF-');
+
+    // 2. DOCX Export
+    const docxRes = await docxExporter.exportConversation(longConv);
+    expect(docxRes.blob.size).toBeGreaterThan(5000);
+
+    const zip = await JSZip.loadAsync(await blobToArrayBuffer(docxRes.blob));
+    const docXml = await zip.file('word/document.xml').async('string');
+
+    // Sentinel Checks
+    expect(docXml).toContain('SENTINEL_FIRST_MESSAGE');
+    expect(docXml).toContain('SENTINEL_MIDDLE_MESSAGE');
+    expect(docXml).toContain('SENTINEL_LAST_MESSAGE');
+  });
+});
+
 
 

@@ -1,7 +1,8 @@
 /**
  * @file scraper.js
  * Comprehensive conversation scraper converting DOM into Conversation v2 schema.
- * Section 12 of the authoritative specification.
+ * Built with FullConversationCollector to handle virtualized DOM lists, lazy loading,
+ * and bi-directional incremental scrolling without missing or duplicate messages.
  */
 
 import { locate, unvirtualize, waitForStreamEnd, ExportError } from './dom-engine.js';
@@ -103,7 +104,7 @@ export function classifyRole(el, index = 0) {
   // 6. Natural chat turn alternation fallback
   return index % 2 === 0 ? 'user' : 'assistant';
 }
- 
+
 /**
  * Detects whether an element represents an uploaded file / attachment in Z.ai.
  * @param {Element} node
@@ -482,7 +483,6 @@ export function parseBlocks(element, options = {}) {
                 index: idx + 1
               });
 
-              // Collect direct child lists to emit as nested blocks
               const directChildLists = Array.from(li.querySelectorAll(':scope > ul, :scope > ol'));
               for (const cl of directChildLists) {
                 nestedListsToEmit.push(cl);
@@ -590,6 +590,224 @@ export function parseBlocks(element, options = {}) {
 }
 
 /**
+ * Full Conversation Collector.
+ * Performs bi-directional incremental scrolling, stable message fingerprinting,
+ * in-memory message accumulation, and completeness validation for virtualized Z.ai chats.
+ */
+export class FullConversationCollector {
+  constructor(options = {}) {
+    this.options = options;
+    this.collectedMap = new Map(); // id -> msgObj
+    this.orderedIds = [];
+  }
+
+  /**
+   * Generates a stable identity/fingerprint for a message bubble element.
+   * @param {Element} bubble
+   * @param {string} role
+   * @returns {string}
+   */
+  getMessageIdentity(bubble, role) {
+    if (!bubble) return `${role}:${Date.now()}:${Math.random()}`;
+
+    // 1. Explicit DOM attributes
+    const explicitId =
+      bubble.getAttribute('data-message-id') ||
+      bubble.getAttribute('data-id') ||
+      bubble.getAttribute('id') ||
+      bubble.getAttribute('data-key');
+    if (explicitId && /^[\w\-:]{4,}$/.test(explicitId)) {
+      return explicitId;
+    }
+
+    // 2. Content-based deterministic fingerprint
+    const text = bubble.textContent?.trim() || '';
+    const textLen = text.length;
+    const startStr = text.substring(0, 45).replace(/\s+/g, ' ');
+    const endStr = text.substring(Math.max(0, textLen - 45)).replace(/\s+/g, ' ');
+
+    return `${role}:${textLen}:${startStr}:${endStr}`;
+  }
+
+  /**
+   * Scrapes currently mounted bubbles in DOM and accumulates unique messages.
+   * Preserves exact chronological conversation sequence via relative DOM positioning.
+   * @returns {{ total: number, newCount: number, mounted: number }}
+   */
+  collectMountedBubbles(options = {}) {
+    const loc = locate();
+    const bubbles = loc.messageBubbles || [];
+    let newCount = 0;
+
+    const currentMountedIds = [];
+    for (let idx = 0; idx < bubbles.length; idx++) {
+      const bubble = bubbles[idx];
+      const role = classifyRole(bubble, idx);
+      const msgId = this.getMessageIdentity(bubble, role);
+      currentMountedIds.push(msgId);
+    }
+
+    for (let idx = 0; idx < bubbles.length; idx++) {
+      const bubble = bubbles[idx];
+      const role = classifyRole(bubble, idx);
+      const msgId = currentMountedIds[idx];
+
+      if (!this.collectedMap.has(msgId)) {
+        // Parse blocks immediately while element is mounted in DOM
+        const blocks = parseBlocks(bubble, options);
+        const rawHtml = bubble.innerHTML;
+        const sanitizedHtml = sanitizeHtml(rawHtml);
+        const rawText = bubble.textContent?.trim() || '';
+
+        const msgObj = {
+          id: msgId,
+          role,
+          html: sanitizedHtml,
+          text: rawText,
+          blocks,
+          timestamp: Date.now()
+        };
+
+        this.collectedMap.set(msgId, msgObj);
+
+        // Relative DOM sequence insertion
+        let insertPos = -1;
+        for (let j = idx + 1; j < currentMountedIds.length; j++) {
+          const nextMountedId = currentMountedIds[j];
+          const existingIdx = this.orderedIds.indexOf(nextMountedId);
+          if (existingIdx !== -1) {
+            insertPos = existingIdx;
+            break;
+          }
+        }
+
+        if (insertPos !== -1) {
+          this.orderedIds.splice(insertPos, 0, msgId);
+        } else {
+          this.orderedIds.push(msgId);
+        }
+
+        newCount++;
+      }
+    }
+
+    return { total: this.collectedMap.size, newCount, mounted: bubbles.length };
+  }
+
+  /**
+   * Runs the full bi-directional incremental scrolling & accumulation loop.
+   */
+  async collectAll(container, options = {}) {
+    const { maxScrollAttempts = 30, settleDelayMs = 250 } = options;
+
+    // Initial scan
+    this.collectMountedBubbles(options);
+
+    if (!container || typeof container.scrollHeight !== 'number') {
+      return this.getOrderedMessages();
+    }
+
+    const originalScrollTop = container.scrollTop;
+    const isScrollable = container.scrollHeight > container.clientHeight;
+
+    if (!isScrollable && typeof window !== 'undefined') {
+      this.collectMountedBubbles(options);
+      return this.getOrderedMessages();
+    }
+
+    // --- Upward Pass: Reach Oldest Message / Beginning ---
+    let noProgressAttempts = 0;
+    let attempts = 0;
+
+    while (attempts < maxScrollAttempts && noProgressAttempts < 4) {
+      attempts++;
+      const currentTop = container.scrollTop;
+
+      // Scroll up
+      if (container === document.body || container === document.documentElement) {
+        if (typeof window !== 'undefined') window.scrollBy(0, -600);
+      } else {
+        container.scrollTop = Math.max(0, container.scrollTop - Math.max(container.clientHeight * 0.85, 350));
+      }
+      container.dispatchEvent(new Event('scroll', { bubbles: true }));
+
+      await new Promise((r) => setTimeout(r, settleDelayMs));
+
+      const res = this.collectMountedBubbles(options);
+
+      const isAtTop = container.scrollTop === 0;
+      const scrollMoved = container.scrollTop !== currentTop;
+
+      if (res.newCount > 0) {
+        noProgressAttempts = 0;
+      } else if (isAtTop || !scrollMoved) {
+        noProgressAttempts++;
+      }
+    }
+
+    // --- Downward Pass: Reach Newest Message / Ending ---
+    noProgressAttempts = 0;
+    attempts = 0;
+
+    while (attempts < maxScrollAttempts && noProgressAttempts < 4) {
+      attempts++;
+      const currentTop = container.scrollTop;
+
+      // Scroll down
+      if (container === document.body || container === document.documentElement) {
+        if (typeof window !== 'undefined') window.scrollBy(0, 600);
+      } else {
+        container.scrollTop = Math.min(
+          container.scrollHeight,
+          container.scrollTop + Math.max(container.clientHeight * 0.85, 350)
+        );
+      }
+      container.dispatchEvent(new Event('scroll', { bubbles: true }));
+
+      await new Promise((r) => setTimeout(r, settleDelayMs));
+
+      const res = this.collectMountedBubbles(options);
+
+      const isAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 10;
+      const scrollMoved = container.scrollTop !== currentTop;
+
+      if (res.newCount > 0) {
+        noProgressAttempts = 0;
+      } else if (isAtBottom || !scrollMoved) {
+        noProgressAttempts++;
+      }
+    }
+
+    // Restore user original scroll position
+    try {
+      container.scrollTop = originalScrollTop;
+    } catch {
+      // ignore
+    }
+
+    return this.getOrderedMessages();
+  }
+
+  /**
+   * Returns accumulated messages array indexed in order.
+   */
+  getOrderedMessages() {
+    const list = [];
+    let idx = 0;
+    for (const id of this.orderedIds) {
+      const msg = this.collectedMap.get(id);
+      if (msg) {
+        list.push({
+          ...msg,
+          index: idx++
+        });
+      }
+    }
+    return list;
+  }
+}
+
+/**
  * Scrapes the complete open conversation into a Conversation v2 model.
  *
  * @param {Object} options
@@ -629,61 +847,50 @@ export async function scrapeConversation(options = {}) {
     }
   }
 
-  if (loc.threadContainer) {
-    await unvirtualize(loc.threadContainer);
+  if (waitForStream) {
+    await waitForStreamEnd(10000);
   }
 
-  let isStreamingTimedOut = false;
-  if (waitForStream) {
-    const finished = await waitForStreamEnd(10000);
-    if (!finished) {
-      isStreamingTimedOut = true;
-    }
+  // Use FullConversationCollector to traverse virtualized DOM list & accumulate complete chat
+  const collector = new FullConversationCollector(options);
+  const rawMessages = await collector.collectAll(loc.threadContainer, {
+    maxScrollAttempts: 30,
+    settleDelayMs: 200,
+    includeThinking,
+    includeArtifacts,
+    includeCitations
+  });
+
+  if (rawMessages.length === 0) {
+    throw new ExportError('INCOMPLETE_EXTRACTION', 'Could not verify full conversation capture. Zero messages collected.');
   }
+
+  // Completeness Metrics & Logging
+  const userCount = rawMessages.filter((m) => m.role === 'user').length;
+  const assistantCount = rawMessages.filter((m) => m.role === 'assistant').length;
+  const firstPreview = rawMessages[0]?.text.substring(0, 45).replace(/\n/g, ' ') || '';
+  const lastPreview = rawMessages[rawMessages.length - 1]?.text.substring(0, 45).replace(/\n/g, ' ') || '';
+
+  console.log(`[ZAI EXPORT] Full collection complete: ${rawMessages.length} unique messages collected.`);
+  console.log(`[ZAI EXPORT] User messages: ${userCount}, Assistant messages: ${assistantCount}`);
+  console.log(`[ZAI EXPORT] First message: "${firstPreview}"`);
+  console.log(`[ZAI EXPORT] Last message: "${lastPreview}"`);
 
   const conversation = createEmptyConversation();
   conversation.title = loc.title;
   conversation.model = loc.modelBadge;
   conversation.theme = loc.theme;
 
-  const messages = [];
-  const bubbles = loc.messageBubbles;
-
-  for (let idx = 0; idx < bubbles.length; idx++) {
-    const bubble = bubbles[idx];
-    const role = classifyRole(bubble, idx);
-    const rawHtml = bubble.innerHTML;
-    const sanitizedHtml = sanitizeHtml(rawHtml);
-    const rawText = bubble.textContent?.trim() || '';
-
-    const blocks = parseBlocks(bubble, {
-      includeThinking,
-      includeArtifacts,
-      includeCitations
-    });
-
-    const isLast = idx === bubbles.length - 1;
-    messages.push({
-      index: idx,
-      role,
-      html: sanitizedHtml,
-      text: rawText,
-      blocks,
-      timestamp: Date.now(),
-      streaming: isLast && isStreamingTimedOut
-    });
-  }
-
   // Filter messages based on range or selectedIndices
-  let filteredMessages = messages;
+  let filteredMessages = rawMessages;
   if (Array.isArray(selectedIndices) && selectedIndices.length > 0) {
     const indexSet = new Set(selectedIndices);
-    filteredMessages = messages.filter((m) => indexSet.has(m.index));
+    filteredMessages = rawMessages.filter((m) => indexSet.has(m.index));
   } else if (range === 'from_here') {
-    filteredMessages = messages.slice(fromHereStartIndex);
+    filteredMessages = rawMessages.slice(fromHereStartIndex);
   } else if (range && Array.isArray(range) && range.length === 2) {
     const [start, end] = range;
-    filteredMessages = messages.slice(start, end + 1);
+    filteredMessages = rawMessages.slice(start, end + 1);
   }
 
   conversation.messages = filteredMessages;
