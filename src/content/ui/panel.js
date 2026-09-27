@@ -33,23 +33,17 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
   overlay.setAttribute('aria-modal', 'true');
   overlay.setAttribute('aria-label', 'Export Conversation');
 
+  const logoUrl =
+    typeof chrome !== 'undefined' && chrome.runtime?.getURL
+      ? chrome.runtime.getURL('src/assets/icons/32.png')
+      : '../assets/icons/32.png';
+
   overlay.innerHTML = `
     <div class="zaix-panel">
       <!-- Header -->
       <div class="zaix-header">
         <div class="zaix-header-brand">
-          <svg viewBox="0 0 48 48" width="22" height="22" fill="none" style="border-radius:6px; flex-shrink:0;">
-            <defs>
-              <linearGradient id="panelLogoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#4F46E5" />
-                <stop offset="100%" stop-color="#06B6D4" />
-              </linearGradient>
-            </defs>
-            <rect width="48" height="48" rx="12" fill="url(#panelLogoGrad)" />
-            <path d="M12 15C12 12.7909 13.7909 11 16 11H32C34.2091 11 36 12.7909 36 15V27C36 29.2091 34.2091 31 32 31H20L14 36V31H16C13.7909 31 12 29.2091 12 27V15Z" fill="rgba(15, 23, 42, 0.3)" />
-            <path d="M17 17.5H31L20.5 28.5H31" stroke="#FFFFFF" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" />
-            <path d="M29 14L34 14M34 14V19M34 14L26 22" stroke="#38BDF8" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
+          <img src="${logoUrl}" width="22" height="22" style="border-radius:6px; flex-shrink:0; box-shadow:0 0 8px rgba(99,102,241,0.5);" alt="Z.ai Logo" />
           <h2 class="zaix-title">Z.ai Chat Exporter</h2>
           <span class="zaix-badge">Ctrl+K</span>
         </div>
