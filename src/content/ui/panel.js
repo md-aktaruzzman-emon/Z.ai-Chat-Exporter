@@ -1,10 +1,12 @@
 /**
  * @file panel.js
  * Main Export Control Panel injected in closed Shadow DOM.
+ * Includes Selective Turn Export, Markdown Clipboard Copy, and Command Palette.
  * Section 18 of the authoritative specification.
  */
 
 import { t } from '../../core/utils/i18n.js';
+import * as markdownExporter from '../../exporters/markdown.js';
 
 /**
  * Creates the export panel component.
@@ -13,13 +15,15 @@ import { t } from '../../core/utils/i18n.js';
  * @param {Function} props.onPreview - Triggers preview modal
  * @param {Function} props.onHistory - Opens history drawer
  * @param {Function} props.onClose - Closes the panel
+ * @param {Function} [props.onThemeChange] - Handles theme changes
  * @returns {{
  *   element: HTMLElement,
  *   updateStats: (stats: Object) => void,
  *   setConversationData: (conv: Object) => void,
  *   setStatus: (status: string, isError?: boolean, diagnostics?: Object) => void,
  *   setStreaming: (isStreaming: boolean) => void,
- *   getOptions: () => Object
+ *   getOptions: () => Object,
+ *   setTheme: (theme: string) => void
  * }}
  */
 export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeChange }) {
@@ -115,18 +119,32 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
             <input type="text" id="zaix-title-input" class="zaix-input" value="Z.ai Conversation" />
           </div>
 
-          <!-- Message Range -->
+          <!-- Message Range Selection -->
           <div class="zaix-form-group">
             <label class="zaix-label" for="zaix-range-select">Message Range</label>
             <select id="zaix-range-select" class="zaix-select">
               <option value="all">All Messages in Thread</option>
               <option value="from_here">From Current View to End</option>
-              <option value="custom">Custom Selection</option>
+              <option value="custom">Custom Selective Turns</option>
             </select>
           </div>
 
-          <!-- Custom Message Checkbox List Container -->
-          <div id="zaix-custom-messages-container" style="display:none; max-height:140px; overflow-y:auto; border:1px solid var(--zaix-border); border-radius:6px; padding:6px; background:var(--zaix-bg); flex-direction:column; gap:6px;">
+          <!-- Custom Message Selective Turns Section -->
+          <div id="zaix-custom-messages-section" style="display:none; flex-direction:column; gap:6px; margin-top:8px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; flex-wrap:wrap;">
+              <input type="text" id="zaix-turn-filter" placeholder="🔍 Filter turns by keyword..." class="zaix-input" style="flex:1; min-width:130px; padding:4px 8px; font-size:11.5px;" />
+              <div style="display:flex; gap:4px;">
+                <button type="button" id="zaix-btn-select-all" class="zaix-btn-pill" style="font-size:10.5px; padding:2px 6px;">All</button>
+                <button type="button" id="zaix-btn-select-none" class="zaix-btn-pill" style="font-size:10.5px; padding:2px 6px;">None</button>
+                <button type="button" id="zaix-btn-select-user" class="zaix-btn-pill" style="font-size:10.5px; padding:2px 6px;">👤 User</button>
+                <button type="button" id="zaix-btn-select-ai" class="zaix-btn-pill" style="font-size:10.5px; padding:2px 6px;">🤖 AI</button>
+              </div>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--zaix-muted); padding:0 2px;">
+              <span id="zaix-turn-counter">Selected 0 of 0 messages</span>
+            </div>
+            <div id="zaix-custom-messages-container" style="max-height:140px; overflow-y:auto; border:1px solid var(--zaix-border); border-radius:6px; padding:6px; background:var(--zaix-surface); display:flex; flex-direction:column; gap:4px;">
+            </div>
           </div>
         </div>
 
@@ -224,10 +242,11 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
         </details>
       </div>
 
-      <!-- Footer with Live Status Feedback -->
+      <!-- Footer with Live Status Feedback & Quick Actions -->
       <div class="zaix-footer">
         <div class="zaix-footer-status" id="zaix-footer-status" style="display:none;"></div>
         <div class="zaix-footer-actions">
+          <button type="button" class="zaix-btn" id="zaix-btn-copy-md" title="Copy clean formatted Markdown to clipboard">📋 Copy MD</button>
           <button type="button" class="zaix-btn" id="zaix-btn-history">History</button>
           <button type="button" class="zaix-btn" id="zaix-btn-preview">Preview</button>
           <button type="button" class="zaix-btn zaix-btn-primary" id="zaix-btn-export">Export Now</button>
@@ -244,17 +263,28 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
   const filenameInput = overlay.querySelector('#zaix-filename-input');
   const formatSelect = overlay.querySelector('#zaix-format-select');
   const rangeSelect = overlay.querySelector('#zaix-range-select');
+
+  const customMessagesSection = overlay.querySelector('#zaix-custom-messages-section');
   const customMessagesContainer = overlay.querySelector('#zaix-custom-messages-container');
+  const turnFilterInput = overlay.querySelector('#zaix-turn-filter');
+  const turnCounterEl = overlay.querySelector('#zaix-turn-counter');
+  const btnSelectAll = overlay.querySelector('#zaix-btn-select-all');
+  const btnSelectNone = overlay.querySelector('#zaix-btn-select-none');
+  const btnSelectUser = overlay.querySelector('#zaix-btn-select-user');
+  const btnSelectAi = overlay.querySelector('#zaix-btn-select-ai');
+
   const pdfEngineGroup = overlay.querySelector('#zaix-pdf-engine-group');
   const mdPresetGroup = overlay.querySelector('#zaix-md-preset-group');
   const layoutControls = overlay.querySelector('#zaix-layout-controls');
   const exportBtn = overlay.querySelector('#zaix-btn-export');
   const previewBtn = overlay.querySelector('#zaix-btn-preview');
   const historyBtn = overlay.querySelector('#zaix-btn-history');
+  const copyMdBtn = overlay.querySelector('#zaix-btn-copy-md');
   const themeSelect = overlay.querySelector('#zaix-theme-select');
   const themeToggleBtn = overlay.querySelector('#zaix-panel-theme-toggle');
 
   let currentTheme = 'light';
+  let activeConversation = null;
 
   function updateThemeDisplay(theme) {
     currentTheme = theme;
@@ -300,7 +330,7 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
 
   const COMMANDS = [
     {
-      label: 'Export as PDF',
+      label: 'Export as PDF Document',
       action: () => {
         formatSelect.value = 'pdf';
         formatSelect.dispatchEvent(new Event('change'));
@@ -317,16 +347,13 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
       }
     },
     {
-      label: 'Export as Markdown (Obsidian)',
+      label: 'Copy Clean Markdown to Clipboard',
       action: () => {
-        formatSelect.value = 'md';
-        overlay.querySelector('#zaix-md-preset-select').value = 'obsidian';
-        formatSelect.dispatchEvent(new Event('change'));
-        exportBtn.click();
+        if (copyMdBtn) copyMdBtn.click();
       }
     },
     {
-      label: 'Export as DOCX',
+      label: 'Export as Word DOCX',
       action: () => {
         formatSelect.value = 'docx';
         formatSelect.dispatchEvent(new Event('change'));
@@ -334,7 +361,7 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
       }
     },
     {
-      label: 'Export as JSON',
+      label: 'Export as Raw JSON Data',
       action: () => {
         formatSelect.value = 'json';
         formatSelect.dispatchEvent(new Event('change'));
@@ -342,38 +369,9 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
       }
     },
     {
-      label: 'Export as TXT',
+      label: 'Toggle Theme (Light / Dark)',
       action: () => {
-        formatSelect.value = 'txt';
-        formatSelect.dispatchEvent(new Event('change'));
-        exportBtn.click();
-      }
-    },
-    {
-      label: 'Export as CSV',
-      action: () => {
-        formatSelect.value = 'csv';
-        formatSelect.dispatchEvent(new Event('change'));
-        exportBtn.click();
-      }
-    },
-    {
-      label: 'Toggle PII Anonymization',
-      action: () => {
-        const chk = overlay.querySelector('#zaix-chk-pii');
-        chk.checked = !chk.checked;
-      }
-    },
-    {
-      label: 'Open Preview',
-      action: () => {
-        previewBtn.click();
-      }
-    },
-    {
-      label: 'Open History',
-      action: () => {
-        historyBtn.click();
+        if (themeToggleBtn) themeToggleBtn.click();
       }
     }
   ];
@@ -409,8 +407,63 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
 
   // Range selection changes
   rangeSelect.addEventListener('change', () => {
-    customMessagesContainer.style.display = rangeSelect.value === 'custom' ? 'flex' : 'none';
+    customMessagesSection.style.display = rangeSelect.value === 'custom' ? 'flex' : 'none';
   });
+
+  function updateTurnCounter() {
+    const total = customMessagesContainer.querySelectorAll('.zaix-turn-row').length;
+    const checked = customMessagesContainer.querySelectorAll('.zaix-turn-cb:checked').length;
+    if (turnCounterEl) {
+      turnCounterEl.textContent = `Selected ${checked} of ${total} message${total === 1 ? '' : 's'}`;
+    }
+  }
+
+  // Selective Turn Controls
+  if (btnSelectAll) {
+    btnSelectAll.addEventListener('click', () => {
+      customMessagesContainer.querySelectorAll('.zaix-turn-cb').forEach((cb) => (cb.checked = true));
+      updateTurnCounter();
+    });
+  }
+
+  if (btnSelectNone) {
+    btnSelectNone.addEventListener('click', () => {
+      customMessagesContainer.querySelectorAll('.zaix-turn-cb').forEach((cb) => (cb.checked = false));
+      updateTurnCounter();
+    });
+  }
+
+  if (btnSelectUser) {
+    btnSelectUser.addEventListener('click', () => {
+      customMessagesContainer.querySelectorAll('.zaix-turn-row').forEach((row) => {
+        const isUser = row.getAttribute('data-role') === 'user';
+        const cb = row.querySelector('.zaix-turn-cb');
+        if (cb) cb.checked = isUser;
+      });
+      updateTurnCounter();
+    });
+  }
+
+  if (btnSelectAi) {
+    btnSelectAi.addEventListener('click', () => {
+      customMessagesContainer.querySelectorAll('.zaix-turn-row').forEach((row) => {
+        const isAi = row.getAttribute('data-role') === 'assistant';
+        const cb = row.querySelector('.zaix-turn-cb');
+        if (cb) cb.checked = isAi;
+      });
+      updateTurnCounter();
+    });
+  }
+
+  if (turnFilterInput) {
+    turnFilterInput.addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase().trim();
+      customMessagesContainer.querySelectorAll('.zaix-turn-row').forEach((row) => {
+        const txt = row.textContent.toLowerCase();
+        row.style.display = txt.includes(q) ? 'flex' : 'none';
+      });
+    });
+  }
 
   // Event handlers
   closeBtn.addEventListener('click', onClose);
@@ -436,7 +489,49 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
     }
   });
 
-  // Keyboard accessibility: Escape and Ctrl+K (Section 36)
+  // Copy Clean Markdown to Clipboard
+  if (copyMdBtn) {
+    copyMdBtn.addEventListener('click', async () => {
+      if (!activeConversation) return;
+      try {
+        const opts = getOptions();
+        let targetMessages = activeConversation.messages || [];
+
+        if (opts.selectedIndices && Array.isArray(opts.selectedIndices)) {
+          const s = new Set(opts.selectedIndices);
+          targetMessages = targetMessages.filter((m) => s.has(m.index));
+        }
+
+        const convClone = {
+          ...activeConversation,
+          messages: targetMessages
+        };
+
+        const mdRes = await markdownExporter.exportConversation(convClone, {
+          preset: opts.preset || 'github',
+          includeThinking: opts.includeThinking,
+          includeArtifacts: opts.includeArtifacts,
+          includeCitations: opts.includeCitations
+        });
+
+        const text = await mdRes.blob.text();
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+          const origText = copyMdBtn.textContent;
+          copyMdBtn.textContent = '✓ Copied!';
+          copyMdBtn.style.color = '#10b981';
+          setTimeout(() => {
+            copyMdBtn.textContent = origText;
+            copyMdBtn.style.color = '';
+          }, 2000);
+        }
+      } catch (err) {
+        console.error('[Panel] Copy Markdown error:', err);
+      }
+    });
+  }
+
+  // Keyboard accessibility: Escape and Ctrl+K
   overlay.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (commandPalette.style.display !== 'none') {
@@ -460,7 +555,7 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
 
   function getSelectedMessageIndices() {
     if (rangeSelect.value !== 'custom') return null;
-    const checkboxes = customMessagesContainer.querySelectorAll('input[type="checkbox"]:checked');
+    const checkboxes = customMessagesContainer.querySelectorAll('.zaix-turn-cb:checked');
     return Array.from(checkboxes).map((cb) => parseInt(cb.getAttribute('data-index'), 10));
   }
 
@@ -500,6 +595,8 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
 
   function setConversationData(conv) {
     if (!conv) return;
+    activeConversation = conv;
+
     if (conv.title) {
       titleInput.value = conv.title;
     }
@@ -510,18 +607,24 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
       customMessagesContainer.innerHTML = '';
       conv.messages.forEach((m) => {
         const row = document.createElement('label');
-        row.className = 'zaix-checkbox-label';
-        row.style.fontSize = '12px';
-        const snippet = (m.text || '').substring(0, 60);
+        row.className = 'zaix-checkbox-label zaix-turn-row';
+        row.setAttribute('data-role', m.role || 'assistant');
+        row.style.cssText = 'font-size: 11.5px; padding: 4px 6px; border-radius: 4px; display: flex; align-items: center; gap: 6px; cursor: pointer; transition: background 0.15s ease;';
+
+        const snippet = (m.text || '').substring(0, 60).replace(/\n/g, ' ');
+        const roleIcon = m.role === 'user' ? '👤' : '🤖';
 
         const cb = document.createElement('input');
         cb.type = 'checkbox';
+        cb.className = 'zaix-turn-cb';
         cb.setAttribute('data-index', String(m.index));
         cb.checked = true;
+        cb.addEventListener('change', updateTurnCounter);
 
         const textSpan = document.createElement('span');
+        textSpan.style.cssText = 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;';
         const strong = document.createElement('strong');
-        strong.textContent = `#${m.index + 1} (${m.role}): `;
+        strong.textContent = `${roleIcon} #${m.index + 1}: `;
         textSpan.appendChild(strong);
         textSpan.appendChild(document.createTextNode(`${snippet}...`));
 
@@ -529,6 +632,7 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
         row.appendChild(textSpan);
         customMessagesContainer.appendChild(row);
       });
+      updateTurnCounter();
     }
   }
 
@@ -561,7 +665,6 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
       exportBtn.classList.remove('success');
       exportBtn.innerHTML = 'Export Now';
 
-      // Optional Copy diagnostics button (Section 18 & 32)
       const copyDiagBtn = document.createElement('button');
       copyDiagBtn.type = 'button';
       copyDiagBtn.className = 'zaix-btn';
@@ -569,7 +672,7 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
       copyDiagBtn.textContent = 'Copy diagnostics';
       copyDiagBtn.addEventListener('click', () => {
         const diagInfo = {
-          extensionVersion: '2.0.0',
+          extensionVersion: '2.1.0',
           host: typeof window !== 'undefined' ? window.location?.host : 'unknown',
           format: formatSelect.value,
           diagnostics: diagnostics || { message: text }
