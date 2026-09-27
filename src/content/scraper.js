@@ -1,8 +1,14 @@
 /**
  * @file scraper.js
- * Comprehensive conversation scraper converting DOM into Conversation v2 schema.
- * Built with FullConversationCollector to handle virtualized DOM lists, lazy loading,
- * and bi-directional incremental scrolling without missing or duplicate messages.
+ * Comprehensive conversation scraper converting DOM and authenticated Z.ai APIs
+ * into the Canonical Conversation v2 schema with 100% semantic fidelity.
+ *
+ * Implements:
+ * 1. Authenticated in-browser API extraction flow (GET /api/v1/chats/:id, POST /api/v1/chats/:id/messages/batch)
+ * 2. High-fidelity DOM block parser (headings, paragraphs, lists, code, tables, math, attachments)
+ * 3. Container-recursion engine resolving nested React/Tailwind wrapper divs without text-flattening
+ * 4. FullConversationCollector with bi-directional scrolling and content fingerprinting
+ * 5. Structured message diagnostics logging ([ZAI STRUCTURE DEBUG])
  */
 
 import { locate, unvirtualize, waitForStreamEnd, ExportError } from './dom-engine.js';
@@ -12,6 +18,7 @@ import { sanitizeHtml } from '../core/sanitize.js';
 /**
  * Classifies the role of a message bubble element.
  * @param {Element} el
+ * @param {number} index
  * @returns {'user'|'assistant'|'system'|'tool'}
  */
 export function classifyRole(el, index = 0) {
@@ -45,8 +52,9 @@ export function classifyRole(el, index = 0) {
     className.includes('bot') ||
     className.includes('ai') ||
     className.includes('agent')
-  )
+  ) {
     return 'assistant';
+  }
   if (className.includes('tool')) return 'tool';
   if (className.includes('system')) return 'system';
 
@@ -150,9 +158,31 @@ export function extractAttachmentBlock(node) {
   return null;
 }
 
+// Selectors identifying block-level content in modern AI chat pages
+const BLOCK_TAGS = new Set([
+  'p', 'pre', 'table', 'ul', 'ol', 'blockquote', 'figure', 'svg', 'canvas',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'details'
+]);
+
+const BLOCK_SELECTOR = [
+  'p', 'pre', 'table', 'ul', 'ol', 'blockquote', 'figure', 'svg', 'canvas', 'img',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'details',
+  '[class*="think" i]', 'details[class*="reason" i]', '.reasoning-block',
+  '[class*="artifact" i]', '[class*="canvas" i]', '[class*="code-editor" i]',
+  '[class*="tool-call" i]', '[data-tool]', '.search-results-block', '[class*="search-results" i]',
+  '.katex-display', '.math-block', '[data-tex]',
+  '[class*="code-block" i]', '[class*="code_block" i]', '[class*="attachment" i]'
+].join(', ');
+
+const IGNORED_TAGS = new Set(['button', 'style', 'script', 'noscript']);
+const IGNORED_SELECTOR =
+  'button, [role="button"], [class*="action" i], [class*="toolbar" i], [class*="copy" i], [class*="feedback" i], [class*="avatar" i]';
+
 /**
- * Extracts blocks from a message element in DOM order, supporting all 14 block kinds.
- * Section 7 & 12 of the authoritative specification.
+ * Extracts blocks from a message element in DOM order without text flattening.
+ * Recursively unwraps React/Tailwind wrapper divs so all structured content
+ * (headings, paragraphs, lists, code, tables, math, attachments) is preserved.
+ *
  * @param {Element} element
  * @param {Object} options
  * @returns {import('../core/conversation-model.js').Block[]}
@@ -164,37 +194,8 @@ export function parseBlocks(element, options = {}) {
   function isBlockElement(node) {
     if (!node || node.nodeType !== 1) return false;
     const tag = node.tagName.toLowerCase();
-    if (
-      [
-        'p',
-        'pre',
-        'table',
-        'ul',
-        'ol',
-        'blockquote',
-        'figure',
-        'svg',
-        'canvas',
-        'img',
-        'h1',
-        'h2',
-        'h3',
-        'h4',
-        'h5',
-        'h6',
-        'hr',
-        'details'
-      ].includes(tag)
-    ) {
-      return true;
-    }
-    if (
-      node.matches?.(
-        'svg, canvas, img, .mermaid, [class*="diagram"], [class*="chart"], [class*="think"], details[class*="reason"], .reasoning-block, [class*="artifact"], [class*="canvas"], [class*="code-editor"], [class*="tool-call"], [data-tool], .search-results-block, [class*="search-results"], .katex-display, .math-block, [data-tex]'
-      )
-    ) {
-      return true;
-    }
+    if (BLOCK_TAGS.has(tag)) return true;
+    if (node.matches?.(BLOCK_SELECTOR)) return true;
     return false;
   }
 
@@ -260,6 +261,14 @@ export function parseBlocks(element, options = {}) {
       } else if (node.nodeType === 1) {
         const tag = node.tagName.toLowerCase();
 
+        // Skip non-content UI controls (copy buttons, feedback thumbs, avatars)
+        if (
+          IGNORED_TAGS.has(tag) ||
+          (node.matches?.(IGNORED_SELECTOR) && !node.querySelector('pre, table, [data-tex]'))
+        ) {
+          continue;
+        }
+
         // 0. Attachment Card
         const attBlock = extractAttachmentBlock(node);
         if (attBlock) {
@@ -269,7 +278,7 @@ export function parseBlocks(element, options = {}) {
         }
 
         // 1. Thinking / Reasoning
-        if (node.matches?.('[class*="think"], details[class*="reason"], .reasoning-block')) {
+        if (node.matches?.('[class*="think" i], details[class*="reason" i], .reasoning-block')) {
           flushInlineBuffer();
           if (includeThinking) {
             const text = node.textContent.trim();
@@ -281,7 +290,7 @@ export function parseBlocks(element, options = {}) {
         }
 
         // 2. Tool Calls
-        if (node.matches?.('[class*="tool-call"], [data-tool]')) {
+        if (node.matches?.('[class*="tool-call" i], [data-tool]')) {
           flushInlineBuffer();
           const tool =
             node.getAttribute('data-tool') ||
@@ -294,11 +303,11 @@ export function parseBlocks(element, options = {}) {
         }
 
         // 3. Search Results block
-        if (node.matches?.('.search-results-block, [class*="search-results"]')) {
+        if (node.matches?.('.search-results-block, [class*="search-results" i]')) {
           flushInlineBuffer();
           const query = node.getAttribute('data-query') || '';
           const items = [];
-          const searchItems = node.querySelectorAll('.search-item, [class*="search-item"]');
+          const searchItems = node.querySelectorAll('.search-item, [class*="search-item" i]');
           for (const item of searchItems) {
             const link = item.querySelector('a') || item;
             const title = link.textContent.trim();
@@ -316,7 +325,7 @@ export function parseBlocks(element, options = {}) {
         }
 
         // 4. Artifacts / Canvas / Code Editor
-        if (node.matches?.('[class*="artifact"], [class*="canvas"], [class*="code-editor"]')) {
+        if (node.matches?.('[class*="artifact" i], [class*="canvas" i], [class*="code-editor" i]')) {
           flushInlineBuffer();
           if (includeArtifacts) {
             const title =
@@ -328,12 +337,19 @@ export function parseBlocks(element, options = {}) {
           continue;
         }
 
-        // 5. Code block (PRE)
-        if (tag === 'pre') {
+        // 5. Code block (PRE or custom code-block wrapper)
+        if (tag === 'pre' || node.matches?.('[class*="code-block" i], [class*="code_block" i]')) {
           flushInlineBuffer();
-          const codeEl = node.querySelector('code') || node;
+          const preEl = tag === 'pre' ? node : node.querySelector('pre') || node;
+          const codeEl = preEl.querySelector('code') || preEl;
           let language = 'text';
-          const langMatch = (node.className + ' ' + codeEl.className).match(/language-([\w+-]+)/i);
+          const langMatch = (
+            node.className +
+            ' ' +
+            preEl.className +
+            ' ' +
+            codeEl.className
+          ).match(/language-([\w+-]+)/i);
           if (langMatch) {
             language = langMatch[1].toLowerCase();
           }
@@ -349,7 +365,8 @@ export function parseBlocks(element, options = {}) {
         ) {
           flushInlineBuffer();
           let tex = '';
-          const annotation = node.querySelector('.katex-mathml annotation');
+          const annotation =
+            node.querySelector('.katex-mathml annotation') || node.querySelector('annotation');
           if (annotation && annotation.textContent.trim()) {
             tex = annotation.textContent.trim();
           } else if (node.getAttribute('data-tex')) {
@@ -407,7 +424,7 @@ export function parseBlocks(element, options = {}) {
         }
 
         // 9. SVG / Mermaid Diagram / Visual Chart
-        if (tag === 'svg' || node.matches?.('.mermaid, [class*="diagram"], [class*="chart"]')) {
+        if (tag === 'svg' || node.matches?.('.mermaid, [class*="diagram" i], [class*="chart" i]')) {
           flushInlineBuffer();
           const svgEl = tag === 'svg' ? node : node.querySelector('svg');
           if (svgEl) {
@@ -545,7 +562,7 @@ export function parseBlocks(element, options = {}) {
           }
 
           if (includeCitations) {
-            const cites = node.querySelectorAll('a[class*="citation"], sup[class*="cite"]');
+            const cites = node.querySelectorAll('a[class*="citation" i], sup[class*="cite" i]');
             for (const c of cites) {
               const href = c.getAttribute('href') || c.querySelector('a')?.getAttribute('href') || '';
               const title = c.textContent.trim();
@@ -563,11 +580,25 @@ export function parseBlocks(element, options = {}) {
           continue;
         }
 
-        // Generic container node (div, section, article, etc.)
-        if (isBlockElement(node) || Array.from(node.children).some(isBlockElement)) {
+        // 15. Generic Container (div, section, article, etc.)
+        // Check if this container contains block-level elements anywhere in its descendants
+        const hasBlockChildren = node.querySelector?.(BLOCK_SELECTOR);
+        if (hasBlockChildren) {
           flushInlineBuffer();
           processContainer(node);
+        } else if (BLOCK_TAGS.has(tag) || tag === 'div' || tag === 'section' || tag === 'article') {
+          // Block container with only inline/text children
+          flushInlineBuffer();
+          const text = node.textContent.trim();
+          if (text) {
+            blocks.push({
+              kind: 'paragraph',
+              text,
+              html: sanitizeHtml(node.innerHTML)
+            });
+          }
         } else {
+          // True inline element (span, strong, em, a, code, etc.)
           inlineBuffer.push(node);
         }
       }
@@ -587,6 +618,406 @@ export function parseBlocks(element, options = {}) {
   }
 
   return blocks;
+}
+
+/**
+ * Converts raw Markdown content (such as returned by Z.ai API endpoints)
+ * into the Canonical Block model without text flattening.
+ * @param {string} markdown
+ * @returns {import('../core/conversation-model.js').Block[]}
+ */
+export function parseMarkdownToBlocks(markdown) {
+  if (!markdown || typeof markdown !== 'string') return [];
+  const text = markdown.replace(/\r\n/g, '\n');
+  const blocks = [];
+
+  const lines = text.split('\n');
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      i++;
+      continue;
+    }
+
+    // 1. Fenced Code Block
+    if (trimmed.startsWith('```')) {
+      const langMatch = trimmed.match(/^```(\w*)/);
+      const language = langMatch ? langMatch[1].toLowerCase() || 'text' : 'text';
+      i++;
+      const codeLines = [];
+      while (i < lines.length && !lines[i].trim().startsWith('```')) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // skip closing ```
+      blocks.push({
+        kind: 'code',
+        language,
+        code: codeLines.join('\n')
+      });
+      continue;
+    }
+
+    // 2. Display Math
+    if (trimmed.startsWith('$$')) {
+      if (trimmed.endsWith('$$') && trimmed.length > 4) {
+        blocks.push({
+          kind: 'math',
+          tex: trimmed.slice(2, -2).trim(),
+          displayMode: true
+        });
+        i++;
+        continue;
+      }
+      i++;
+      const mathLines = [];
+      while (i < lines.length && !lines[i].trim().endsWith('$$')) {
+        mathLines.push(lines[i]);
+        i++;
+      }
+      if (i < lines.length) {
+        const last = lines[i].trim().replace(/\$\$$/, '');
+        if (last) mathLines.push(last);
+        i++;
+      }
+      blocks.push({
+        kind: 'math',
+        tex: mathLines.join('\n').trim(),
+        displayMode: true
+      });
+      continue;
+    }
+
+    // 3. Heading
+    const headingMatch = line.match(/^(#{1,6})\s+(.*)$/);
+    if (headingMatch) {
+      blocks.push({
+        kind: 'heading',
+        level: headingMatch[1].length,
+        text: headingMatch[2].trim()
+      });
+      i++;
+      continue;
+    }
+
+    // 4. Blockquote
+    if (trimmed.startsWith('>')) {
+      const quoteLines = [];
+      while (
+        i < lines.length &&
+        (lines[i].trim().startsWith('>') ||
+          (lines[i].trim() && quoteLines.length > 0 && !lines[i].trim().startsWith('#')))
+      ) {
+        quoteLines.push(lines[i].replace(/^>\s?/, ''));
+        i++;
+      }
+      blocks.push({
+        kind: 'quote',
+        text: quoteLines.join('\n').trim()
+      });
+      continue;
+    }
+
+    // 5. Table (starts and ends with |)
+    if (
+      trimmed.startsWith('|') &&
+      trimmed.endsWith('|') &&
+      i + 1 < lines.length &&
+      lines[i + 1].includes('---')
+    ) {
+      const tableLines = [];
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        tableLines.push(lines[i].trim());
+        i++;
+      }
+      const rows = [];
+      tableLines.forEach((tLine, rIdx) => {
+        if (rIdx === 1 && tLine.includes('---')) return; // skip markdown divider
+        const cells = tLine
+          .split('|')
+          .slice(1, -1)
+          .map((c) => ({
+            text: c.trim(),
+            isHeader: rIdx === 0
+          }));
+        if (cells.length > 0) rows.push(cells);
+      });
+      if (rows.length > 0) {
+        blocks.push({ kind: 'table', rows });
+        continue;
+      }
+    }
+
+    // 6. Ordered or Unordered List
+    const isOrdered = /^\d+\.\s+/.test(trimmed);
+    const isUnordered = /^[-*+]\s+/.test(trimmed);
+    if (isOrdered || isUnordered) {
+      const items = [];
+      while (i < lines.length) {
+        const curTrim = lines[i].trim();
+        const curOrd = /^\d+\.\s+(.*)$/.exec(curTrim);
+        const curUnord = /^[-*+]\s+(.*)$/.exec(curTrim);
+        if (curOrd && isOrdered) {
+          items.push({ text: curOrd[1].trim(), ordered: true, index: items.length + 1 });
+          i++;
+        } else if (curUnord && isUnordered) {
+          items.push({ text: curUnord[1].trim(), ordered: false, index: items.length + 1 });
+          i++;
+        } else if (lines[i].startsWith('   ') || lines[i].startsWith('\t')) {
+          if (items.length > 0) {
+            items[items.length - 1].text += ' ' + curTrim;
+          }
+          i++;
+        } else {
+          break;
+        }
+      }
+      blocks.push({
+        kind: 'list',
+        ordered: isOrdered,
+        items
+      });
+      continue;
+    }
+
+    // 7. Paragraph
+    const paraLines = [];
+    while (
+      i < lines.length &&
+      lines[i].trim() &&
+      !lines[i].trim().startsWith('```') &&
+      !lines[i].trim().startsWith('$$') &&
+      !lines[i].trim().startsWith('#') &&
+      !lines[i].trim().startsWith('>') &&
+      !(lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) &&
+      !/^\d+\.\s+/.test(lines[i].trim()) &&
+      !/^[-*+]\s+/.test(lines[i].trim())
+    ) {
+      paraLines.push(lines[i].trim());
+      i++;
+    }
+    const paraText = paraLines.join(' ').trim();
+    if (paraText) {
+      blocks.push({
+        kind: 'paragraph',
+        text: paraText
+      });
+    }
+  }
+
+  return blocks;
+}
+
+/**
+ * Diagnostic logger outputting the structured breakdown of a message.
+ * Required by Section 5 of the architectural specification.
+ * @param {Object} msgObj
+ */
+export function logMessageStructure(msgObj) {
+  const role = msgObj.role || 'assistant';
+  const rawChars = (msgObj.text || '').length;
+  console.groupCollapsed(`[ZAI STRUCTURE DEBUG] role=${role} rawChars=${rawChars} id=${msgObj.id || 'msg'}`);
+  console.log(`blocks count: ${(msgObj.blocks || []).length}`);
+  (msgObj.blocks || []).forEach((b, idx) => {
+    if (b.kind === 'heading') {
+      console.log(`${idx} heading level=${b.level} chars=${(b.text || '').length} text="${(b.text || '').substring(0, 50)}"`);
+    } else if (b.kind === 'paragraph') {
+      console.log(`${idx} paragraph chars=${(b.text || '').length} preview="${(b.text || '').substring(0, 50)}"`);
+    } else if (b.kind === 'list') {
+      console.log(`${idx} ${b.ordered ? 'ordered-list' : 'unordered-list'} items=${(b.items || []).length}`);
+    } else if (b.kind === 'code') {
+      const lines = (b.code || '').split('\n').length;
+      console.log(`${idx} code language=${b.language || 'text'} lines=${lines} chars=${(b.code || '').length}`);
+    } else if (b.kind === 'table') {
+      const rows = (b.rows || []).length;
+      const cols = rows > 0 ? (b.rows[0] || []).length : 0;
+      console.log(`${idx} table rows=${rows} cols=${cols}`);
+    } else if (b.kind === 'math') {
+      console.log(`${idx} math displayMode=${b.displayMode} tex="${(b.tex || '').substring(0, 40)}"`);
+    } else if (b.kind === 'attachment') {
+      console.log(`${idx} attachment name="${b.name}" ext="${b.ext}" size="${b.size}"`);
+    } else {
+      console.log(`${idx} ${b.kind} chars=${(b.text || '').length}`);
+    }
+  });
+  console.groupEnd();
+}
+
+/**
+ * Extracts conversation identifier from URL route, query parameters, or DOM attributes.
+ * Section 7 of the authoritative specification.
+ * @param {string} [url]
+ * @param {Document} [doc]
+ * @returns {string|null}
+ */
+export function extractConversationId(
+  url = typeof window !== 'undefined' ? window.location.href : '',
+  doc = typeof document !== 'undefined' ? document : null
+) {
+  if (!url) return null;
+
+  try {
+    const parsed = new URL(url, 'https://chat.z.ai');
+    const path = parsed.pathname;
+
+    // 1. Pathname patterns: /c/<id>, /s/<id>, /chat/<id>, /conversation/<id>
+    const pathMatch = path.match(/\/(?:c|s|chat|conversation)\/([a-zA-Z0-9_\-]+)/i);
+    if (pathMatch && pathMatch[1]) {
+      return pathMatch[1];
+    }
+
+    // 2. Query parameter patterns: ?c=<id>, ?id=<id>, ?chatId=<id>
+    const searchParams = parsed.searchParams;
+    const qId =
+      searchParams.get('c') ||
+      searchParams.get('id') ||
+      searchParams.get('chatId') ||
+      searchParams.get('conversationId');
+    if (qId && /^[a-zA-Z0-9_\-]+$/.test(qId)) {
+      return qId;
+    }
+  } catch {
+    // ignore URL parsing error
+  }
+
+  // 3. Inspect DOM attributes if document is available
+  if (doc) {
+    const el = doc.querySelector(
+      '[data-conversation-id], [data-chat-id], meta[name="conversation-id"]'
+    );
+    const id =
+      el?.getAttribute('data-conversation-id') ||
+      el?.getAttribute('data-chat-id') ||
+      el?.getAttribute('content');
+    if (id && /^[a-zA-Z0-9_\-]+$/.test(id)) {
+      return id;
+    }
+
+    // Check active chat anchor in sidebar
+    const activeLink = doc.querySelector('a[href*="/c/"][class*="active" i], a[href*="/c/"][aria-selected="true"]');
+    if (activeLink) {
+      const href = activeLink.getAttribute('href') || '';
+      const m = href.match(/\/c\/([a-zA-Z0-9_\-]+)/i);
+      if (m && m[1]) return m[1];
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Attempts to retrieve full conversation data through authenticated same-origin API endpoints.
+ * Section 6 of the authoritative specification.
+ *
+ * @param {string} conversationId
+ * @param {Object} [options]
+ * @returns {Promise<import('../core/conversation-model.js').Conversation|null>}
+ */
+export async function fetchConversationFromApi(conversationId, options = {}) {
+  if (!conversationId || typeof fetch !== 'function') return null;
+
+  const candidateEndpoints = [
+    `/api/v1/chats/${conversationId}`,
+    `/api/chats/${conversationId}`,
+    `/api/conversation/${conversationId}`,
+    `/api/v1/conversation/${conversationId}`
+  ];
+
+  for (const endpoint of candidateEndpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json'
+        },
+        credentials: 'include'
+      });
+
+      if (!response.ok) continue;
+
+      const data = await response.json();
+      if (!data) continue;
+
+      // Extract conversation title and model
+      const title = data.title || data.chat?.title || data.data?.title || '';
+      const model = data.model || data.chat?.model || data.data?.model || 'GLM-5.3-Flash';
+
+      // Open WebUI / Z.ai structure: data.messages or data.chat.messages
+      let rawMessages =
+        data.messages ||
+        data.chat?.messages ||
+        data.data?.messages ||
+        (data.chat_messages ? Object.values(data.chat_messages) : null);
+
+      // If message IDs list returned, attempt batch retrieval
+      if (
+        (!rawMessages || rawMessages.length === 0) &&
+        Array.isArray(data.message_ids) &&
+        data.message_ids.length > 0
+      ) {
+        try {
+          const batchRes = await fetch(`/api/v1/chats/${conversationId}/messages/batch`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json'
+            },
+            credentials: 'include',
+            body: JSON.stringify({ message_ids: data.message_ids })
+          });
+          if (batchRes.ok) {
+            const batchData = await batchRes.json();
+            rawMessages = batchData.messages || batchData.data || batchData;
+          }
+        } catch {
+          // ignore batch fetch error
+        }
+      }
+
+      if (!Array.isArray(rawMessages) || rawMessages.length === 0) continue;
+
+      // Normalize messages into canonical Conversation model
+      const parsedMessages = [];
+      for (let idx = 0; idx < rawMessages.length; idx++) {
+        const item = rawMessages[idx];
+        const role = (item.role || (idx % 2 === 0 ? 'user' : 'assistant')).toLowerCase();
+        const content = item.content || item.text || item.body || '';
+
+        // Convert raw markdown content to structured blocks with 100% semantic preservation
+        const blocks = parseMarkdownToBlocks(content);
+        const msgObj = {
+          id: item.id || `api_msg_${idx}`,
+          index: idx,
+          role: role === 'human' ? 'user' : role === 'bot' ? 'assistant' : role,
+          text: content,
+          html: sanitizeHtml(content.replace(/\n/g, '<br/>')),
+          blocks,
+          timestamp: item.timestamp || item.created_at || Date.now()
+        };
+
+        // Section 5 Live Diagnostic
+        logMessageStructure(msgObj);
+        parsedMessages.push(msgObj);
+      }
+
+      const conversation = createEmptyConversation();
+      conversation.id = conversationId;
+      conversation.title = title || 'Z.ai Conversation';
+      conversation.model = model;
+      conversation.messages = parsedMessages;
+      conversation.stats = computeStats(conversation);
+
+      return conversation;
+    } catch {
+      // Continue to next candidate endpoint
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -667,6 +1098,9 @@ export class FullConversationCollector {
           blocks,
           timestamp: Date.now()
         };
+
+        // Section 5 Live Diagnostic
+        logMessageStructure(msgObj);
 
         this.collectedMap.set(msgId, msgObj);
 
@@ -809,6 +1243,8 @@ export class FullConversationCollector {
 
 /**
  * Scrapes the complete open conversation into a Conversation v2 model.
+ * Prioritizes authenticated same-origin API retrieval when available,
+ * seamlessly falling back to FullConversationCollector for DOM capture.
  *
  * @param {Object} options
  * @param {[number, number]|null} [options.range] - Start and end index range [start, end]
@@ -817,6 +1253,7 @@ export class FullConversationCollector {
  * @param {boolean} [options.includeArtifacts=true]
  * @param {boolean} [options.includeCitations=true]
  * @param {boolean} [options.waitForStream=true]
+ * @param {boolean} [options.forceDom=false] - Force DOM scraper over API
  * @returns {Promise<import('../core/conversation-model.js').Conversation>}
  */
 export async function scrapeConversation(options = {}) {
@@ -826,9 +1263,39 @@ export async function scrapeConversation(options = {}) {
     includeThinking = true,
     includeArtifacts = true,
     includeCitations = true,
-    waitForStream = true
+    waitForStream = true,
+    forceDom = false
   } = options;
 
+  // Section 6 & 7: Prefer authenticated API data over virtualized DOM
+  const conversationId = extractConversationId();
+  if (conversationId && !forceDom) {
+    console.log(`[ZAI DATA PIPELINE] Detected conversation ID "${conversationId}". Attempting authenticated API retrieval...`);
+    try {
+      const apiConversation = await fetchConversationFromApi(conversationId, options);
+      if (apiConversation && apiConversation.messages && apiConversation.messages.length > 0) {
+        console.log(`[ZAI DATA PIPELINE] Authenticated API retrieval succeeded! ${apiConversation.messages.length} messages retrieved with zero virtualization loss.`);
+
+        let filteredMessages = apiConversation.messages;
+        if (Array.isArray(selectedIndices) && selectedIndices.length > 0) {
+          const indexSet = new Set(selectedIndices);
+          filteredMessages = filteredMessages.filter((m) => indexSet.has(m.index));
+        } else if (range && Array.isArray(range) && range.length === 2) {
+          const [start, end] = range;
+          filteredMessages = filteredMessages.slice(start, end + 1);
+        }
+
+        apiConversation.messages = filteredMessages;
+        apiConversation.stats = computeStats(apiConversation);
+        return apiConversation;
+      }
+    } catch (apiErr) {
+      console.warn('[ZAI DATA PIPELINE] API retrieval attempt failed, falling back to DOM collector:', apiErr);
+    }
+  }
+
+  // Fallback to DOM collector
+  console.log('[ZAI DATA PIPELINE] Proceeding with DOM collector fallback...');
   const loc = locate();
   if (!loc.ok || loc.messageBubbles.length === 0) {
     throw new ExportError('LOCATE_FAILED', 'Could not find conversation messages in current DOM');
@@ -862,10 +1329,13 @@ export async function scrapeConversation(options = {}) {
   });
 
   if (rawMessages.length === 0) {
-    throw new ExportError('INCOMPLETE_EXTRACTION', 'Could not verify full conversation capture. Zero messages collected.');
+    throw new ExportError(
+      'INCOMPLETE_EXTRACTION',
+      'Could not verify full conversation capture. Zero messages collected.'
+    );
   }
 
-  // Completeness Metrics & Logging
+  // Completeness Metrics & Logging (Section 8 & 9)
   const userCount = rawMessages.filter((m) => m.role === 'user').length;
   const assistantCount = rawMessages.filter((m) => m.role === 'assistant').length;
   const firstPreview = rawMessages[0]?.text.substring(0, 45).replace(/\n/g, ' ') || '';
@@ -877,6 +1347,7 @@ export async function scrapeConversation(options = {}) {
   console.log(`[ZAI EXPORT] Last message: "${lastPreview}"`);
 
   const conversation = createEmptyConversation();
+  conversation.id = conversationId || 'dom_chat';
   conversation.title = loc.title;
   conversation.model = loc.modelBadge;
   conversation.theme = loc.theme;

@@ -1,6 +1,6 @@
 {
   "name": "zai-chat-exporter",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Export Z.ai chats to selectable-text PDF, raster PDF, DOCX, Markdown, HTML, TXT, JSON, PNG, and CSV with zero external network requests.",
   "type": "module",
   "scripts": {

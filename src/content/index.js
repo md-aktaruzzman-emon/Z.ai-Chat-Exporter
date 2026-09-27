@@ -3,8 +3,8 @@
  * Content script bootstrap injecting closed Shadow DOM UI into chat.z.ai.
  */
 
-import { onThreadChange, isStreaming, detectTheme } from './dom-engine.js';
-import { scrapeConversation } from './scraper.js';
+import { onThreadChange, isStreaming, detectTheme, locate } from './dom-engine.js';
+import { scrapeConversation, parseBlocks, classifyRole, logMessageStructure } from './scraper.js';
 import { createFloatingButton } from './ui/floating-button.js';
 import { createPanel } from './ui/panel.js';
 import { createPreviewModal } from './ui/preview-modal.js';
@@ -336,6 +336,28 @@ chrome.runtime.onMessage.addListener((msg) => {
     });
   }
 });
+
+// Live diagnostic helper for Section 5
+if (typeof window !== 'undefined') {
+  window.__zaiDebugInspectMessage = (idx = 0) => {
+    const loc = locate();
+    const bubbles = loc.messageBubbles || [];
+    if (bubbles.length === 0) {
+      console.warn('[ZAI DEBUG] No message bubbles located in current DOM.');
+      return null;
+    }
+    const bubble = typeof idx === 'number' ? bubbles[idx] || bubbles[bubbles.length - 1] : idx;
+    const blocks = parseBlocks(bubble);
+    const msgObj = {
+      id: bubble.getAttribute?.('data-message-id') || 'inspect',
+      role: classifyRole(bubble, typeof idx === 'number' ? idx : 0),
+      text: bubble.textContent?.trim() || '',
+      blocks
+    };
+    logMessageStructure(msgObj);
+    return msgObj;
+  };
+}
 
 // Bootstrap
 if (document.readyState === 'loading') {
