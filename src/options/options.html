@@ -3,37 +3,55 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Z.ai Chat Exporter - Settings</title>
+    <title>Z.ai Chat Exporter - Settings & Preferences</title>
     <link rel="stylesheet" href="./options.css" />
   </head>
   <body>
     <div class="options-layout">
-      <!-- Top Navigation & Branding -->
-      <header class="options-header">
+      <!-- Top Navigation & Modern Brand Header -->
+      <header class="options-header animate-fade-in">
         <div class="brand">
-          <div class="logo-wrapper">
-            <img src="../assets/icons/48.png" alt="Z.ai Exporter" width="36" height="36" />
+          <div class="logo-wrapper" title="Z.ai Chat Exporter">
+            <svg class="brand-logo-svg" viewBox="0 0 48 48" width="44" height="44" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#4F46E5" />
+                  <stop offset="50%" stop-color="#7C3AED" />
+                  <stop offset="100%" stop-color="#06B6D4" />
+                </linearGradient>
+                <linearGradient id="zGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#FFFFFF" />
+                  <stop offset="100%" stop-color="#E0E7FF" />
+                </linearGradient>
+                <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="3" result="blur" />
+                  <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                </filter>
+              </defs>
+              <rect x="2" y="2" width="44" height="44" rx="12" fill="url(#bgGrad)" />
+              <rect x="2.5" y="2.5" width="43" height="43" rx="11.5" stroke="rgba(255,255,255,0.3)" stroke-width="1" />
+              <!-- Chat Bubble Path -->
+              <path d="M12 15C12 12.7909 13.7909 11 16 11H32C34.2091 11 36 12.7909 36 15V27C36 29.2091 34.2091 31 32 31H20L14 36V31H16C13.7909 31 12 29.2091 12 27V15Z" fill="rgba(15, 23, 42, 0.28)" />
+              <!-- Stylized Z Symbol -->
+              <path d="M17 17.5H31L20.5 28.5H31" stroke="url(#zGrad)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" />
+              <!-- Export Speed Arrow -->
+              <path d="M29 14L34 14M34 14V19M34 14L26 22" stroke="#38BDF8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
           </div>
           <div class="brand-text">
             <div class="title-row">
               <h1>Z.ai Chat Exporter</h1>
-              <span class="badge">v2.0.0</span>
+              <span class="badge badge-primary">v2.1.0</span>
+              <span class="badge badge-success">● 100% Local</span>
             </div>
             <p class="subtitle">
-              Personalize your export presets, privacy filters, and browser integrations
+              Personalize export presets, document layout engines, and privacy protections
             </p>
           </div>
         </div>
         <div class="header-actions">
           <a href="https://chat.z.ai" target="_blank" rel="noopener noreferrer" class="link-btn">
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
               <polyline points="15 3 21 3 21 9" />
               <line x1="10" y1="14" x2="21" y2="3" />
@@ -44,34 +62,29 @@
       </header>
 
       <main class="options-body">
-        <!-- Export Defaults Card -->
-        <section class="card">
+        <!-- 1. Export Defaults Card -->
+        <section class="card animate-fade-in-up delay-1">
           <div class="card-header">
             <div class="card-icon bg-indigo">
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                 <polyline points="7 10 12 15 17 10" />
                 <line x1="12" y1="15" x2="12" y2="3" />
               </svg>
             </div>
-            <div>
-              <h2>Export Defaults</h2>
-              <p class="card-desc">
-                Configure default document formatting and file naming patterns
-              </p>
+            <div class="card-header-titles">
+              <h2>Export & Document Defaults</h2>
+              <p class="card-desc">Configure default file naming rules, themes, and conversion formats</p>
             </div>
           </div>
 
           <div class="card-content">
+            <!-- Filename Template -->
             <div class="form-group">
-              <label for="opt-filename-template">Default Filename Template</label>
+              <label for="opt-filename-template">
+                <span>Default Filename Pattern</span>
+                <span class="label-badge">Dynamic Variables</span>
+              </label>
               <div class="input-with-hint">
                 <input
                   type="text"
@@ -81,24 +94,33 @@
                   placeholder="{{title}}_{{date}}"
                 />
               </div>
+
+              <!-- Interactive Token Pills -->
               <div class="token-pills-row">
-                <span class="token-hint">Click tokens to insert:</span>
-                <button type="button" class="token-pill" data-token="{{title}}">{{title}}</button>
-                <button type="button" class="token-pill" data-token="{{date}}">{{date}}</button>
-                <button type="button" class="token-pill" data-token="{{time}}">{{time}}</button>
-                <button type="button" class="token-pill" data-token="{{model}}">{{model}}</button>
-                <button type="button" class="token-pill" data-token="{{format}}">{{format}}</button>
+                <span class="token-hint">Click token to insert:</span>
+                <button type="button" class="token-pill" data-token="{{title}}" title="Insert Conversation Title">{{title}}</button>
+                <button type="button" class="token-pill" data-token="{{date}}" title="Insert Date (YYYY-MM-DD)">{{date}}</button>
+                <button type="button" class="token-pill" data-token="{{time}}" title="Insert Time (HH-MM)">{{time}}</button>
+                <button type="button" class="token-pill" data-token="{{model}}" title="Insert AI Model Name">{{model}}</button>
+                <button type="button" class="token-pill" data-token="{{format}}" title="Insert Export File Format">{{format}}</button>
+              </div>
+
+              <!-- Live Filename Preview Box -->
+              <div class="preview-box">
+                <span class="preview-label">Live Output Preview:</span>
+                <span id="filename-live-preview" class="preview-value">Machine_Learning_Lecture_2026-09-27.pdf</span>
               </div>
             </div>
 
+            <!-- Form Grid Settings -->
             <div class="form-grid">
               <div class="form-group">
-                <label for="opt-default-theme">Default Theme</label>
+                <label for="opt-default-theme">Default Document Theme</label>
                 <div class="select-wrapper">
                   <select id="opt-default-theme" class="form-select">
                     <option value="auto">Auto (Match page theme)</option>
-                    <option value="light">Light Mode</option>
-                    <option value="dark">Dark Mode</option>
+                    <option value="light">Light Mode (Clean Crisp)</option>
+                    <option value="dark">Dark Mode (Midnight)</option>
                   </select>
                 </div>
               </div>
@@ -107,8 +129,8 @@
                 <label for="opt-pdf-engine">Default PDF Engine</label>
                 <div class="select-wrapper">
                   <select id="opt-pdf-engine" class="form-select">
-                    <option value="vector">Vector (Fast & Selectable Text)</option>
-                    <option value="raster">Raster (HTML DOM Snapshot)</option>
+                    <option value="vector">Vector (Fast, Selectable & Zero Overlap)</option>
+                    <option value="raster">Raster (Pixel-Perfect DOM Snapshot)</option>
                   </select>
                 </div>
               </div>
@@ -127,24 +149,17 @@
           </div>
         </section>
 
-        <!-- Privacy & Features Card -->
-        <section class="card">
+        <!-- 2. Privacy & Security Integrations Card -->
+        <section class="card animate-fade-in-up delay-2">
           <div class="card-header">
             <div class="card-icon bg-emerald">
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
               </svg>
             </div>
-            <div>
-              <h2>Privacy & Integrations</h2>
-              <p class="card-desc">Control automated sanitization and browser integrations</p>
+            <div class="card-header-titles">
+              <h2>Privacy, Security & Integrations</h2>
+              <p class="card-desc">Control automated data scrubbing, local cache, and browser integration</p>
             </div>
           </div>
 
@@ -152,11 +167,11 @@
             <div class="toggle-list">
               <label class="toggle-item" for="opt-anonymize-pii">
                 <div class="toggle-text">
-                  <span class="toggle-title">Anonymize PII by default</span>
-                  <span class="toggle-desc"
-                    >Automatically scrub emails, phone numbers, API keys, and auth tokens from
-                    exports</span
-                  >
+                  <div class="toggle-title-row">
+                    <span class="toggle-title">Anonymize PII by default</span>
+                    <span class="security-chip">🛡️ Data Shield</span>
+                  </div>
+                  <span class="toggle-desc">Automatically scrub emails, phone numbers, API keys, and bearer tokens from exported documents</span>
                 </div>
                 <div class="switch">
                   <input type="checkbox" id="opt-anonymize-pii" />
@@ -166,11 +181,11 @@
 
               <label class="toggle-item" for="opt-history-optin">
                 <div class="toggle-text">
-                  <span class="toggle-title">Enable Local Export History</span>
-                  <span class="toggle-desc"
-                    >Store past exports in local browser IndexedDB (up to 200 records, never sent
-                    anywhere)</span
-                  >
+                  <div class="toggle-title-row">
+                    <span class="toggle-title">Enable Local Export History</span>
+                    <span class="security-chip">🔒 100% Offline</span>
+                  </div>
+                  <span class="toggle-desc">Store past exports in browser IndexedDB (up to 200 records, never sent to external servers)</span>
                 </div>
                 <div class="switch">
                   <input type="checkbox" id="opt-history-optin" checked />
@@ -180,11 +195,11 @@
 
               <label class="toggle-item" for="opt-context-menu">
                 <div class="toggle-text">
-                  <span class="toggle-title">Enable Browser Context Menus</span>
-                  <span class="toggle-desc"
-                    >Adds right-click options on chat.z.ai to quickly export conversations with 1
-                    click</span
-                  >
+                  <div class="toggle-title-row">
+                    <span class="toggle-title">Enable Browser Context Menus</span>
+                    <span class="security-chip">⚡ Quick Action</span>
+                  </div>
+                  <span class="toggle-desc">Adds right-click options on chat.z.ai to quickly export conversations with a single click</span>
                 </div>
                 <div class="switch">
                   <input type="checkbox" id="opt-context-menu" />
@@ -195,42 +210,74 @@
           </div>
         </section>
 
-        <!-- Selector Profiles Card -->
-        <section class="card">
+        <!-- 3. Engine & System Diagnostics Card -->
+        <section class="card animate-fade-in-up delay-3">
+          <div class="card-header">
+            <div class="card-icon bg-cyan">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10" />
+                <path d="m9 12 2 2 4-4" />
+              </svg>
+            </div>
+            <div class="card-header-titles">
+              <h2>Engine Diagnostics & Capabilities</h2>
+              <p class="card-desc">Verified conversion engines running locally inside your browser</p>
+            </div>
+          </div>
+
+          <div class="card-content">
+            <div class="engine-grid">
+              <div class="engine-item">
+                <div class="engine-dot active"></div>
+                <div class="engine-info">
+                  <span class="engine-title">FullConversationCollector</span>
+                  <span class="engine-sub">Virtualized list incremental scroll</span>
+                </div>
+              </div>
+              <div class="engine-item">
+                <div class="engine-dot active"></div>
+                <div class="engine-info">
+                  <span class="engine-title">PdfLayoutEngine</span>
+                  <span class="engine-sub">Pre-measured zero overlap layout</span>
+                </div>
+              </div>
+              <div class="engine-item">
+                <div class="engine-dot active"></div>
+                <div class="engine-info">
+                  <span class="engine-title">Offline KaTeX Engine</span>
+                  <span class="engine-sub">Vector math & native OMML</span>
+                </div>
+              </div>
+              <div class="engine-item">
+                <div class="engine-dot active"></div>
+                <div class="engine-info">
+                  <span class="engine-title">extrention z Cards</span>
+                  <span class="engine-sub">Mint user cards & attachment boxes</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 4. DOM Selector Profiles Card -->
+        <section class="card animate-fade-in-up delay-4">
           <div class="card-header">
             <div class="card-icon bg-amber">
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="16 18 22 12 16 6" />
                 <polyline points="8 6 2 12 8 18" />
               </svg>
             </div>
-            <div>
+            <div class="card-header-titles">
               <h2>DOM Selector Profiles (Advanced)</h2>
-              <p class="card-desc">
-                Backup, share, or import custom DOM selector overrides if Z.ai updates its layout
-                classes
-              </p>
+              <p class="card-desc">Backup, share, or import custom DOM selector overrides if Z.ai updates its layout classes</p>
             </div>
           </div>
 
           <div class="card-content">
             <div class="profile-actions">
               <button type="button" id="btn-export-profile" class="btn btn-secondary">
-                <svg
-                  width="15"
-                  height="15"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" y1="15" x2="12" y2="3" />
@@ -238,14 +285,7 @@
                 Export Profile JSON
               </button>
               <button type="button" id="btn-import-profile" class="btn btn-secondary">
-                <svg
-                  width="15"
-                  height="15"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                   <polyline points="17 8 12 3 7 8" />
                   <line x1="12" y1="3" x2="12" y2="15" />
@@ -257,28 +297,32 @@
           </div>
         </section>
 
-        <!-- Save Floating Bar -->
-        <div class="save-bar">
+        <!-- Modern Floating Save Action Bar -->
+        <div class="save-bar animate-fade-in-up delay-5">
           <div class="save-info">
+            <span id="unsaved-badge" class="unsaved-badge" style="display: none;">
+              <span class="pulse-dot"></span> Unsaved changes
+            </span>
             <span id="save-status" class="save-status"></span>
           </div>
           <button type="button" id="btn-save-settings" class="btn btn-primary btn-save">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
+            <svg class="save-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
               <polyline points="17 21 17 13 7 13 7 21" />
               <polyline points="7 3 7 8 15 8" />
             </svg>
-            Save Settings
+            <span>Save Settings</span>
           </button>
         </div>
       </main>
+
+      <!-- Toast Notification Container -->
+      <div id="save-toast" class="toast hidden">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.5">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+        <span class="toast-text">Preferences saved successfully!</span>
+      </div>
     </div>
     <script type="module" src="./options.js"></script>
   </body>

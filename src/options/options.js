@@ -1,6 +1,7 @@
 /**
  * @file options.js
- * Controller for Settings & Options page.
+ * Controller for Settings & Options page with live filename preview,
+ * unsaved changes indicator, and animated toast feedback.
  * Section 22 of the authoritative specification.
  */
 
@@ -18,6 +19,10 @@ const DEFAULT_SETTINGS = {
 
 document.addEventListener('DOMContentLoaded', async () => {
   const templateInput = document.getElementById('opt-filename-template');
+  const previewEl = document.getElementById('filename-live-preview');
+  const unsavedBadge = document.getElementById('unsaved-badge');
+  const saveToast = document.getElementById('save-toast');
+
   const themeSelect = document.getElementById('opt-default-theme');
   const pdfEngineSelect = document.getElementById('opt-pdf-engine');
   const mdPresetSelect = document.getElementById('opt-md-preset');
@@ -33,15 +38,62 @@ document.addEventListener('DOMContentLoaded', async () => {
   const fileInput = document.getElementById('file-import-profile');
 
   // Load saved settings
-  const stored = await chrome.storage.sync.get(SETTINGS_KEY);
-  const settings = Object.assign({}, DEFAULT_SETTINGS, stored[SETTINGS_KEY]);
+  let initialSettings = Object.assign({}, DEFAULT_SETTINGS);
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage?.sync) {
+      const stored = await chrome.storage.sync.get(SETTINGS_KEY);
+      initialSettings = Object.assign({}, DEFAULT_SETTINGS, stored[SETTINGS_KEY]);
+    }
+  } catch (err) {
+    console.warn('[Options] storage.sync unavailable, using defaults:', err);
+  }
 
-  templateInput.value = settings.template;
-  themeSelect.value = settings.theme;
-  pdfEngineSelect.value = settings.pdfEngine;
-  mdPresetSelect.value = settings.mdPreset;
-  piiCheckbox.checked = settings.anonymizePii;
-  historyCheckbox.checked = settings.historyOptin;
+  templateInput.value = initialSettings.template;
+  themeSelect.value = initialSettings.theme;
+  pdfEngineSelect.value = initialSettings.pdfEngine;
+  mdPresetSelect.value = initialSettings.mdPreset;
+  piiCheckbox.checked = initialSettings.anonymizePii;
+  historyCheckbox.checked = initialSettings.historyOptin;
+
+  function updateLivePreview() {
+    const rawTpl = templateInput.value.trim() || '{{title}}_{{date}}';
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}`;
+    const modelStr = 'GLM-5.3-Flash';
+    const formatStr = 'pdf';
+
+    const rendered = rawTpl
+      .replace(/\{\{title\}\}/g, 'Machine_Learning_Lecture')
+      .replace(/\{\{date\}\}/g, dateStr)
+      .replace(/\{\{time\}\}/g, timeStr)
+      .replace(/\{\{model\}\}/g, modelStr)
+      .replace(/\{\{format\}\}/g, formatStr);
+
+    if (previewEl) {
+      previewEl.textContent = `${rendered}.${formatStr}`;
+    }
+  }
+
+  function checkUnsavedChanges() {
+    const hasChanges =
+      templateInput.value !== initialSettings.template ||
+      themeSelect.value !== initialSettings.theme ||
+      pdfEngineSelect.value !== initialSettings.pdfEngine ||
+      mdPresetSelect.value !== initialSettings.mdPreset ||
+      piiCheckbox.checked !== initialSettings.anonymizePii ||
+      historyCheckbox.checked !== initialSettings.historyOptin;
+
+    if (unsavedBadge) {
+      unsavedBadge.style.display = hasChanges ? 'inline-flex' : 'none';
+    }
+  }
+
+  updateLivePreview();
+  templateInput.addEventListener('input', () => {
+    updateLivePreview();
+    checkUnsavedChanges();
+  });
 
   function applyTheme(theme) {
     if (theme === 'dark') {
@@ -53,13 +105,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  applyTheme(settings.theme);
+  applyTheme(initialSettings.theme);
 
   themeSelect.addEventListener('change', () => {
     applyTheme(themeSelect.value);
+    checkUnsavedChanges();
   });
 
-  // Interactive token pills to easily insert template variables
+  [pdfEngineSelect, mdPresetSelect, piiCheckbox, historyCheckbox].forEach((el) => {
+    el.addEventListener('change', checkUnsavedChanges);
+  });
+
+  // Interactive token pills
   const tokenPills = document.querySelectorAll('.token-pill');
   tokenPills.forEach((pill) => {
     pill.addEventListener('click', () => {
@@ -71,25 +128,44 @@ document.addEventListener('DOMContentLoaded', async () => {
       templateInput.value = val.substring(0, start) + token + val.substring(end);
       templateInput.focus();
       templateInput.setSelectionRange(start + token.length, start + token.length);
+      updateLivePreview();
+      checkUnsavedChanges();
     });
   });
 
-  // Check actual runtime contextMenus permission status
-  const hasCtxPermission = await chrome.permissions.contains({ permissions: ['contextMenus'] });
-  contextMenuCheckbox.checked = hasCtxPermission && settings.contextMenu;
+  // Check runtime contextMenus permission
+  try {
+    if (typeof chrome !== 'undefined' && chrome.permissions) {
+      const hasCtxPermission = await chrome.permissions.contains({ permissions: ['contextMenus'] });
+      contextMenuCheckbox.checked = hasCtxPermission && initialSettings.contextMenu;
 
-  // Context menu permission toggle flow (Section 22)
-  contextMenuCheckbox.addEventListener('change', async () => {
-    if (contextMenuCheckbox.checked) {
-      const granted = await chrome.permissions.request({ permissions: ['contextMenus'] });
-      if (!granted) {
-        contextMenuCheckbox.checked = false;
-        alert('Context menu permission was not granted.');
-      }
-    } else {
-      await chrome.permissions.remove({ permissions: ['contextMenus'] });
+      contextMenuCheckbox.addEventListener('change', async () => {
+        if (contextMenuCheckbox.checked) {
+          const granted = await chrome.permissions.request({ permissions: ['contextMenus'] });
+          if (!granted) {
+            contextMenuCheckbox.checked = false;
+            alert('Context menu permission was not granted.');
+          }
+        } else {
+          await chrome.permissions.remove({ permissions: ['contextMenus'] });
+        }
+        checkUnsavedChanges();
+      });
     }
-  });
+  } catch {
+    // ignore permission check in mock environments
+  }
+
+  function showToast(message = 'Preferences saved successfully!') {
+    if (!saveToast) return;
+    const textEl = saveToast.querySelector('.toast-text');
+    if (textEl) textEl.textContent = message;
+    saveToast.classList.remove('hidden');
+
+    setTimeout(() => {
+      saveToast.classList.add('hidden');
+    }, 2800);
+  }
 
   saveBtn.addEventListener('click', async () => {
     const newSettings = {
@@ -102,23 +178,40 @@ document.addEventListener('DOMContentLoaded', async () => {
       contextMenu: contextMenuCheckbox.checked
     };
 
-    await chrome.storage.sync.set({ [SETTINGS_KEY]: newSettings });
-
-    saveStatus.textContent = 'Settings saved successfully!';
-    setTimeout(() => {
-      saveStatus.textContent = '';
-    }, 2500);
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage?.sync) {
+        await chrome.storage.sync.set({ [SETTINGS_KEY]: newSettings });
+      }
+      initialSettings = Object.assign({}, newSettings);
+      checkUnsavedChanges();
+      showToast('Settings saved successfully!');
+    } catch (err) {
+      console.error('[Options] Failed to save settings:', err);
+      if (saveStatus) {
+        saveStatus.textContent = 'Save failed. Please try again.';
+      }
+    }
   });
 
   // Selector Profile Export
   exportProfileBtn.addEventListener('click', async () => {
-    const profile = (await chrome.storage.local.get('zai_selector_profile'))
-      ?.zai_selector_profile || {
+    let profile = {
       schemaVersion: 1,
       createdAt: Date.now(),
       host: 'chat.z.ai',
       manualOverrides: {}
     };
+
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        const stored = await chrome.storage.local.get('zai_selector_profile');
+        if (stored?.zai_selector_profile) {
+          profile = stored.zai_selector_profile;
+        }
+      }
+    } catch {
+      // fallback
+    }
 
     const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -127,6 +220,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     a.download = 'zai_selector_profile.json';
     a.click();
     URL.revokeObjectURL(url);
+    showToast('Selector profile exported as JSON!');
   });
 
   // Selector Profile Import
@@ -145,10 +239,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!parsed || typeof parsed !== 'object') {
           throw new Error('Invalid profile schema');
         }
-        await chrome.storage.local.set({ zai_selector_profile: parsed });
-        alert('Selector profile imported successfully!');
+        if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          await chrome.storage.local.set({ zai_selector_profile: parsed });
+        }
+        showToast('Selector profile imported successfully!');
       } catch (err) {
-        alert(`Failed to import selector profile: ${err.message}`);
+        alert(`Failed to import profile: ${err.message}`);
       }
     };
     reader.readAsText(file);
