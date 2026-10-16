@@ -18,6 +18,7 @@ import {
   parseHtmlToInlineRuns
 } from '../core/conversation-model.js';
 import { sanitizeHtml } from '../core/sanitize.js';
+import { marked } from 'marked';
 
 /**
  * Classifies the role of a message bubble element.
@@ -570,6 +571,7 @@ export function parseBlocks(element, options = {}) {
               items.push({
                 text: clone.textContent.trim(),
                 html: sanitizeHtml(clone.innerHTML),
+                runs: parseHtmlToInlineRuns(clone.innerHTML),
                 depth,
                 ordered: isOrd,
                 index: idx + 1
@@ -592,6 +594,7 @@ export function parseBlocks(element, options = {}) {
                       {
                         text: listNode.textContent.trim(),
                         html: sanitizeHtml(listNode.innerHTML),
+                        runs: parseHtmlToInlineRuns(listNode.innerHTML),
                         depth
                       }
                     ]
@@ -609,11 +612,20 @@ export function parseBlocks(element, options = {}) {
         // 13. Quote (BLOCKQUOTE)
         if (tag === 'blockquote') {
           flushInlineBuffer();
+          const qText = node.textContent.trim();
           blocks.push({
             kind: 'quote',
-            text: node.textContent.trim(),
-            html: sanitizeHtml(node.outerHTML)
+            text: qText,
+            html: sanitizeHtml(node.outerHTML),
+            runs: parseHtmlToInlineRuns(node.innerHTML)
           });
+          continue;
+        }
+
+        // 13.5 Horizontal Rule / Divider
+        if (tag === 'hr') {
+          flushInlineBuffer();
+          blocks.push({ kind: 'divider' });
           continue;
         }
 
@@ -654,6 +666,25 @@ export function parseBlocks(element, options = {}) {
             }
           }
 
+          // If <p> contains double line breaks, split into separate paragraphs
+          if (node.innerHTML.includes('<br') || pText.includes('\n\n')) {
+            const htmlParts = node.innerHTML.split(/(?:<br\s*\/?>\s*){2,}|\n\s*\n/i);
+            if (htmlParts.length > 1) {
+              for (const part of htmlParts) {
+                const pTrim = part.replace(/<[^>]*>/g, '').trim();
+                if (pTrim) {
+                  blocks.push({
+                    kind: 'paragraph',
+                    text: pTrim,
+                    html: sanitizeHtml(part),
+                    runs: parseHtmlToInlineRuns(part)
+                  });
+                }
+              }
+              continue;
+            }
+          }
+
           blocks.push({
             kind: 'paragraph',
             text: pText,
@@ -665,7 +696,14 @@ export function parseBlocks(element, options = {}) {
 
         // 15. Generic Container (div, section, article, etc.)
         // Check if this container contains block-level elements anywhere in its descendants
-        const hasBlockChildren = node.querySelector?.(BLOCK_SELECTOR);
+        const hasBlockChildren =
+          node.querySelector?.(BLOCK_SELECTOR) ||
+          Array.from(node.children || []).some(
+            (c) =>
+              BLOCK_TAGS.has(c.tagName.toLowerCase()) ||
+              c.tagName.toLowerCase() === 'div' ||
+              c.tagName.toLowerCase() === 'section'
+          );
         if (hasBlockChildren) {
           flushInlineBuffer();
           processContainer(node);
@@ -674,6 +712,23 @@ export function parseBlocks(element, options = {}) {
           flushInlineBuffer();
           const text = node.textContent.trim();
           if (text) {
+            if (node.innerHTML.includes('<br') || text.includes('\n\n')) {
+              const htmlParts = node.innerHTML.split(/(?:<br\s*\/?>\s*){2,}|\n\s*\n/i);
+              if (htmlParts.length > 1) {
+                for (const part of htmlParts) {
+                  const pTrim = part.replace(/<[^>]*>/g, '').trim();
+                  if (pTrim) {
+                    blocks.push({
+                      kind: 'paragraph',
+                      text: pTrim,
+                      html: sanitizeHtml(part),
+                      runs: parseHtmlToInlineRuns(part)
+                    });
+                  }
+                }
+                continue;
+              }
+            }
             blocks.push({
               kind: 'paragraph',
               text,
@@ -724,6 +779,13 @@ export function parseMarkdownToBlocks(markdown) {
     const trimmed = line.trim();
 
     if (!trimmed) {
+      i++;
+      continue;
+    }
+
+    // 0. Horizontal Rule / Divider
+    if (trimmed.match(/^(\*{3,}|-{3,}|_{3,})$/)) {
+      blocks.push({ kind: 'divider' });
       i++;
       continue;
     }
@@ -798,14 +860,20 @@ export function parseMarkdownToBlocks(markdown) {
       while (
         i < lines.length &&
         (lines[i].trim().startsWith('>') ||
-          (lines[i].trim() && quoteLines.length > 0 && !lines[i].trim().startsWith('#')))
+          (lines[i].trim() &&
+            quoteLines.length > 0 &&
+            !lines[i].trim().startsWith('#') &&
+            !lines[i].trim().match(/^(\*{3,}|-{3,}|_{3,})$/)))
       ) {
         quoteLines.push(lines[i].replace(/^>\s?/, ''));
         i++;
       }
+      const quoteText = quoteLines.join('\n').trim();
       blocks.push({
         kind: 'quote',
-        text: quoteLines.join('\n').trim()
+        text: quoteText,
+        html: sanitizeHtml(quoteText.replace(/\n/g, '<br/>')),
+        runs: parseHtmlToInlineRuns(quoteText)
       });
       continue;
     }
@@ -876,6 +944,7 @@ export function parseMarkdownToBlocks(markdown) {
           items.push({
             text: itemText,
             html: sanitizeHtml(itemText),
+            runs: parseHtmlToInlineRuns(itemText),
             ordered: true,
             index: items.length + 1
           });
@@ -885,6 +954,7 @@ export function parseMarkdownToBlocks(markdown) {
           items.push({
             text: itemText,
             html: sanitizeHtml(itemText),
+            runs: parseHtmlToInlineRuns(itemText),
             ordered: false,
             index: items.length + 1
           });
@@ -893,6 +963,7 @@ export function parseMarkdownToBlocks(markdown) {
           if (items.length > 0) {
             items[items.length - 1].text += ' ' + curTrim;
             items[items.length - 1].html = sanitizeHtml(items[items.length - 1].text);
+            items[items.length - 1].runs = parseHtmlToInlineRuns(items[items.length - 1].text);
           }
           i++;
         } else {
@@ -907,7 +978,7 @@ export function parseMarkdownToBlocks(markdown) {
       continue;
     }
 
-    // 7. Paragraph
+    // 7. Paragraph (Preserve explicit line breaks)
     const paraLines = [];
     while (
       i < lines.length &&
@@ -916,6 +987,7 @@ export function parseMarkdownToBlocks(markdown) {
       !lines[i].trim().startsWith('$$') &&
       !lines[i].trim().startsWith('#') &&
       !lines[i].trim().startsWith('>') &&
+      !lines[i].trim().match(/^(\*{3,}|-{3,}|_{3,})$/) &&
       !(lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) &&
       !/^\d+\.\s+/.test(lines[i].trim()) &&
       !/^[-*+]\s+/.test(lines[i].trim())
@@ -923,7 +995,7 @@ export function parseMarkdownToBlocks(markdown) {
       paraLines.push(lines[i].trim());
       i++;
     }
-    const paraText = paraLines.join(' ').trim();
+    const paraText = paraLines.join('\n').trim();
     if (paraText) {
       blocks.push({
         kind: 'paragraph',
@@ -1124,10 +1196,36 @@ export async function fetchConversationFromApi(conversationId, _options = {}) {
       for (let idx = 0; idx < rawMessages.length; idx++) {
         const item = rawMessages[idx];
         const role = (item.role || (idx % 2 === 0 ? 'user' : 'assistant')).toLowerCase();
-        const content = item.content || item.text || item.body || '';
+        let content = item.content || item.text || item.body || '';
+        const blocks = [];
 
-        // Convert raw markdown content to structured blocks with 100% semantic preservation
-        const blocks = parseMarkdownToBlocks(content);
+        let hasTextBlock = false;
+        // Support Open WebUI / Z.ai content_blocks array
+        if (Array.isArray(item.content_blocks) && item.content_blocks.length > 0) {
+          for (const cb of item.content_blocks) {
+            if (cb.type === 'reasoning' && cb.content) {
+              blocks.push({ kind: 'thinking', text: cb.content });
+            } else if (cb.type === 'text' && cb.content) {
+              hasTextBlock = true;
+              content = (content ? content + '\n\n' : '') + cb.content;
+              blocks.push(...parseMarkdownToBlocks(cb.content));
+            }
+          }
+        }
+
+        // Top-level reasoning fallback
+        if (item.reasoning && typeof item.reasoning === 'string' && item.reasoning.trim()) {
+          const alreadyHasThinking = blocks.some((b) => b.kind === 'thinking');
+          if (!alreadyHasThinking) {
+            blocks.unshift({ kind: 'thinking', text: item.reasoning });
+          }
+        }
+
+        // If content exists and was not already parsed via content_blocks
+        if (content && !hasTextBlock) {
+          blocks.push(...parseMarkdownToBlocks(content));
+        }
+
         const msgObj = {
           id: item.id || `api_msg_${idx}`,
           index: idx,

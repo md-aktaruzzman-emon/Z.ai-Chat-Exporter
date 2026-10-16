@@ -21,7 +21,8 @@ import { generateFilename } from '../core/utils/filename.js';
 import { anonymizeConversation } from './pii.js';
 import { imageSourceToPngBytes, fitDimensions } from '../core/utils/image.js';
 import { renderMathToDocxMath } from '../core/math-renderer.js';
-import { normalizeTableRows } from '../core/table-layout.js';
+import { normalizeTableRows, computeColumnWidths } from '../core/table-layout.js';
+import { parseHtmlToInlineRuns } from '../core/conversation-model.js';
 
 /**
  * Converts structured InlineRun objects directly into docx TextRun elements.
@@ -69,72 +70,12 @@ function parseHtmlToTextRuns(htmlOrTextOrBlock) {
     if (Array.isArray(htmlOrTextOrBlock.runs) && htmlOrTextOrBlock.runs.length > 0) {
       return parseRunsToTextRuns(htmlOrTextOrBlock.runs);
     }
-    return parseHtmlToTextRuns(htmlOrTextOrBlock.html || htmlOrTextOrBlock.text);
+    const content = htmlOrTextOrBlock.html || htmlOrTextOrBlock.text || '';
+    return parseRunsToTextRuns(parseHtmlToInlineRuns(content));
   }
 
-  const htmlOrText = String(htmlOrTextOrBlock);
-
-  if (typeof DOMParser !== 'undefined') {
-    try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(`<div>${htmlOrText}</div>`, 'text/html');
-      const root = doc.body.firstElementChild || doc.body;
-      const runs = [];
-
-      function traverse(node, state = { bold: false, italic: false, code: false, link: null }) {
-        if (node.nodeType === 3) {
-          // Text node
-          const text = node.textContent;
-          if (text) {
-            const lines = text.split('\n');
-            lines.forEach((line, idx) => {
-              if (idx > 0) {
-                runs.push(new TextRun({ text: '', break: 1 }));
-              }
-              if (line.length > 0) {
-                runs.push(
-                  new TextRun({
-                    text: line,
-                    bold: state.bold,
-                    italics: state.italic,
-                    font: state.code ? 'Consolas' : undefined,
-                    color: state.link ? '2563EB' : undefined,
-                    size: state.code ? 19 : 22
-                  })
-                );
-              }
-            });
-          }
-          return;
-        }
-
-        if (node.nodeType === 1) {
-          const tag = node.tagName.toLowerCase();
-          if (tag === 'br') {
-            runs.push(new TextRun({ text: '', break: 1 }));
-            return;
-          }
-          const nextState = { ...state };
-          if (tag === 'strong' || tag === 'b') nextState.bold = true;
-          if (tag === 'em' || tag === 'i') nextState.italic = true;
-          if (tag === 'code') nextState.code = true;
-          if (tag === 'a') nextState.link = node.getAttribute('href');
-
-          for (const child of node.childNodes) {
-            traverse(child, nextState);
-          }
-        }
-      }
-
-      traverse(root);
-      if (runs.length > 0) return runs;
-    } catch {
-      // fallback
-    }
-  }
-
-  const raw = htmlOrText.replace(/<[^>]*>/g, '');
-  return [new TextRun({ text: raw, size: 22 })];
+  const str = String(htmlOrTextOrBlock);
+  return parseRunsToTextRuns(parseHtmlToInlineRuns(str));
 }
 
 /**
@@ -242,6 +183,11 @@ async function createBlocksDocx(msg, modelName) {
             const bulletStr = isOrd ? `${itemIndex}. ` : '• ';
             const leftIndent = 480 + depth * 360;
 
+            const itemRuns =
+              Array.isArray(it.runs) && it.runs.length > 0
+                ? parseRunsToTextRuns(it.runs)
+                : parseHtmlToTextRuns(it.html || it.text);
+
             items.push(
               new Paragraph({
                 spacing: { before: 60, after: 60 },
@@ -252,7 +198,7 @@ async function createBlocksDocx(msg, modelName) {
                     bold: true,
                     size: 22
                   }),
-                  ...parseHtmlToTextRuns(it.html || it.text)
+                  ...itemRuns
                 ]
               })
             );
@@ -265,6 +211,15 @@ async function createBlocksDocx(msg, modelName) {
             })
           );
         }
+      } else if (block.kind === 'divider') {
+        items.push(
+          new Paragraph({
+            border: {
+              bottom: { style: BorderStyle.SINGLE, size: 6, color: 'E2E8F0', space: 1 }
+            },
+            spacing: { before: 200, after: 200 }
+          })
+        );
       } else if (block.kind === 'quote') {
         items.push(
           new Paragraph({
@@ -395,18 +350,26 @@ async function createBlocksDocx(msg, modelName) {
               color: 'CBD5E1'
             };
 
+            const colWidths = computeColumnWidths(tableRows, 100);
+
             const docxRows = tableRows.map((rowCells, rIdx) => {
               const isHeader = rIdx === 0 || rowCells.some((c) => c.isHeader);
-              const cells = rowCells.map((c) => {
+              const cells = rowCells.map((c, cIdx) => {
+                const colW = Math.max(5, Math.round(colWidths[cIdx] || 100 / rowCells.length));
                 return new TableCell({
-                  shading: isHeader ? { fill: 'F1F5F9' } : undefined,
+                  width: { size: colW, type: WidthType.PERCENTAGE },
+                  shading: isHeader
+                    ? { fill: 'F1F5F9' }
+                    : rIdx % 2 === 1
+                      ? { fill: 'F8FAFC' }
+                      : undefined,
                   margins: { top: 140, bottom: 140, left: 180, right: 180 },
                   columnSpan: c.colspan > 1 ? c.colspan : undefined,
                   rowSpan: c.rowspan > 1 ? c.rowspan : undefined,
                   children: [
                     new Paragraph({
                       spacing: { before: 0, after: 0 },
-                      children: parseHtmlToTextRuns(c.html || c.text)
+                      children: parseHtmlToTextRuns(c)
                     })
                   ]
                 });
@@ -541,6 +504,29 @@ export async function exportConversation(originalConversation, options = {}) {
   ];
 
   for (const msg of conv.messages) {
+    const hasBlocks =
+      Array.isArray(msg.blocks) &&
+      msg.blocks.some((b) => {
+        if (b.kind === 'paragraph' || b.kind === 'heading' || b.kind === 'quote') {
+          return (
+            (b.text && b.text.trim()) ||
+            (b.runs && b.runs.length > 0) ||
+            (b.html && b.html.trim())
+          );
+        }
+        if (b.kind === 'code') return b.code && b.code.trim();
+        if (b.kind === 'table') return b.rows && b.rows.length > 0;
+        if (b.kind === 'list') return b.items && b.items.length > 0;
+        if (b.kind === 'image') return b.src || b.dataUrl;
+        if (b.kind === 'attachment') return b.name;
+        if (b.kind === 'divider') return true;
+        if (b.kind === 'thinking') return b.text && b.text.trim();
+        return true;
+      });
+    const hasText = Boolean(msg.text && msg.text.trim());
+    if (!hasBlocks && !hasText) {
+      continue;
+    }
     const msgParagraphs = await createBlocksDocx(msg, conv.model);
     docChildren.push(...msgParagraphs);
   }

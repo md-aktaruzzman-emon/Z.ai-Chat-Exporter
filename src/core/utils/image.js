@@ -186,8 +186,7 @@ export async function imageSourceToPngBytes(imgSrc) {
               canvas.width = dims.width * scale;
               canvas.height = dims.height * scale;
 
-              ctx.fillStyle = '#ffffff';
-              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
               ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
               URLObj.revokeObjectURL(blobUrl);
 

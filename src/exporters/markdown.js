@@ -81,6 +81,30 @@ export async function exportConversation(originalConversation, options = {}) {
   lines.push(`# ${conv.title}\n`);
 
   for (const msg of conv.messages) {
+    const hasBlocks =
+      Array.isArray(msg.blocks) &&
+      msg.blocks.some((b) => {
+        if (b.kind === 'paragraph' || b.kind === 'heading' || b.kind === 'quote') {
+          return (
+            (b.text && b.text.trim()) ||
+            (b.runs && b.runs.length > 0) ||
+            (b.html && b.html.trim())
+          );
+        }
+        if (b.kind === 'code') return b.code && b.code.trim();
+        if (b.kind === 'table') return b.rows && b.rows.length > 0;
+        if (b.kind === 'list') return b.items && b.items.length > 0;
+        if (b.kind === 'image') return b.src || b.dataUrl;
+        if (b.kind === 'attachment') return b.name;
+        if (b.kind === 'divider') return true;
+        if (b.kind === 'thinking') return b.text && b.text.trim();
+        return true;
+      });
+    const hasText = Boolean(msg.text && msg.text.trim());
+    if (!hasBlocks && !hasText) {
+      continue;
+    }
+
     const isUser = msg.role === 'user';
     const roleLabel = isUser ? 'User' : 'Z.ai Assistant';
 
@@ -120,6 +144,21 @@ export async function exportConversation(originalConversation, options = {}) {
           } else {
             lines.push(`$${block.tex}$`);
           }
+        } else if (block.kind === 'list') {
+          if (block.html) {
+            lines.push(turndown.turndown(block.html) + '\n');
+          } else if (Array.isArray(block.items)) {
+            const listLines = block.items.map((it, idx) => {
+              const prefix = it.ordered ? `${it.index || idx + 1}. ` : '- ';
+              const indent = '  '.repeat(it.depth || 0);
+              return `${indent}${prefix}${it.text || ''}`;
+            });
+            lines.push(listLines.join('\n') + '\n');
+          }
+        } else if (block.kind === 'divider') {
+          lines.push('\n---\n');
+        } else if (block.kind === 'attachment') {
+          lines.push(`📎 **Attachment:** \`${block.name || 'File'}\`${block.size ? ` (${block.size})` : ''}\n`);
         } else if (block.kind === 'table') {
           if (block.html) {
             lines.push(turndown.turndown(block.html) + '\n');

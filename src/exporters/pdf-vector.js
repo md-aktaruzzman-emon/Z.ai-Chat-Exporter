@@ -313,6 +313,39 @@ function wrapText(text, maxWidth, font, fontSize) {
 }
 
 /**
+ * Combines adjacent line segments that share the same styling and script into a single segment.
+ * Minimizes SVG rasterizations and preserves natural font metrics and word kerning.
+ */
+function coalesceLineSegments(line) {
+  if (!Array.isArray(line) || line.length <= 1) return line;
+  const coalesced = [];
+  let current = null;
+
+  for (const seg of line) {
+    if (!seg.text) continue;
+    const isComplex = hasComplexUnicode(seg.text);
+    if (
+      current &&
+      current.font === seg.font &&
+      current.size === seg.size &&
+      current.isBold === seg.isBold &&
+      current.isItalic === seg.isItalic &&
+      current.isCode === seg.isCode &&
+      current.link === seg.link &&
+      current.isComplex === isComplex
+    ) {
+      current.text += seg.text;
+      current.width += seg.width;
+    } else {
+      if (current) coalesced.push(current);
+      current = { ...seg, isComplex };
+    }
+  }
+  if (current) coalesced.push(current);
+  return coalesced;
+}
+
+/**
  * Splits inline runs into lines of formatted segments fitting maxWidth.
  * Handles bold, italic, code, links, whitespace, and complex Unicode word metrics.
  * @param {import('../core/conversation-model.js').InlineRun[]} runs
@@ -329,7 +362,7 @@ function wrapRuns(runs, maxWidth, fontRegular, fontBold, fontItalic, fontMono, f
 
   const measureToken = (text, font, size) => {
     if (hasComplexUnicode(text)) {
-      return Math.min(Math.max(text.length * size * 0.75, 12), maxWidth);
+      return Math.min(Math.max(text.length * size * 0.72, 8), maxWidth);
     }
     try {
       return font.widthOfTextAtSize(safeWinAnsiText(text, font), size);
@@ -416,7 +449,7 @@ function wrapRuns(runs, maxWidth, fontRegular, fontBold, fontItalic, fontMono, f
       } else {
         if (token.width > maxWidth) {
           if (currentLine.length > 0) {
-            allLines.push(currentLine);
+            allLines.push(coalesceLineSegments(currentLine));
             currentLine = [];
             currentLineWidth = 0;
           }
@@ -444,7 +477,7 @@ function wrapRuns(runs, maxWidth, fontRegular, fontBold, fontItalic, fontMono, f
           }
         } else {
           if (currentLine.length > 0) {
-            allLines.push(currentLine);
+            allLines.push(coalesceLineSegments(currentLine));
             currentLine = [];
             currentLineWidth = 0;
           }
@@ -455,7 +488,7 @@ function wrapRuns(runs, maxWidth, fontRegular, fontBold, fontItalic, fontMono, f
     }
 
     if (currentLine.length > 0) {
-      allLines.push(currentLine);
+      allLines.push(coalesceLineSegments(currentLine));
     }
   }
 
@@ -472,12 +505,13 @@ function createUnicodeTextSvgDataUrl(text, fontSize, colorHex, isBold, maxWidth)
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-  const height = Math.round(fontSize * 1.5);
-  const width = Math.min(Math.max(text.length * fontSize * 0.75, 60), maxWidth);
+  const height = Math.round(fontSize * 1.45);
+  const estWidth = Math.ceil(text.length * fontSize * 0.72) + 2;
+  const width = Math.min(Math.max(estWidth, 4), maxWidth);
 
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-  <text x="0" y="${fontSize * 1.15}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Bengali', Kalpurush, sans-serif" font-size="${fontSize}px" font-weight="${isBold ? 'bold' : 'normal'}" fill="${colorHex}">${safeText}</text>
+  <text x="0" y="${fontSize * 1.12}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans Bengali', Kalpurush, sans-serif" font-size="${fontSize}px" font-weight="${isBold ? 'bold' : 'normal'}" fill="${colorHex}">${safeText}</text>
 </svg>`.trim();
 
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
@@ -589,8 +623,9 @@ class PdfLayoutEngine {
         if (convResult && convResult.bytes) {
           const img = await this.pdfDoc.embedPng(convResult.bytes);
           const fitted = fitDimensions(convResult.width, convResult.height, maxWidth, size * 1.5);
-          // Baseline alignment: align SVG text baseline with standard font baseline curY
-          const baselineOffset = fitted.height * 0.233;
+          // Baseline alignment: in SVG text baseline is at size * 1.12 from top of SVG.
+          // Distance from baseline to bottom of image is fitted.height - (size * 1.12).
+          const baselineOffset = Math.max(0, fitted.height - size * 1.12);
           this.currentPage.drawImage(img, {
             x,
             y: curY - baselineOffset,
@@ -655,26 +690,31 @@ class PdfLayoutEngine {
     let spaceBefore = 10;
     let spaceAfter = 5;
     let lineHeight = 17;
+    let keepWithNextMin = 30;
     if (block.level === 1) {
       hSize = 18;
-      lineHeight = 22;
-      spaceBefore = 14;
+      lineHeight = 23;
+      spaceBefore = 16;
       spaceAfter = 8;
+      keepWithNextMin = 40;
     } else if (block.level === 2) {
       hSize = 15;
-      lineHeight = 19;
-      spaceBefore = 12;
+      lineHeight = 20;
+      spaceBefore = 13;
       spaceAfter = 6;
+      keepWithNextMin = 35;
     } else if (block.level === 3) {
       hSize = 13;
       lineHeight = 17;
       spaceBefore = 10;
       spaceAfter = 5;
+      keepWithNextMin = 30;
     } else {
-      hSize = 11;
+      hSize = 11.5;
       lineHeight = 15;
       spaceBefore = 8;
       spaceAfter = 4;
+      keepWithNextMin = 25;
     }
 
     const hText = block.text || htmlToText(block.html) || '';
@@ -682,7 +722,6 @@ class PdfLayoutEngine {
     const lines = wrapText(hText, maxW, this.fontBold, hSize);
     const contentHeight = lines.length * lineHeight;
     const totalHeight = spaceBefore + contentHeight + spaceAfter;
-    const keepWithNextMin = 35;
     return {
       kind: 'heading',
       hSize,
@@ -722,7 +761,7 @@ class PdfLayoutEngine {
         this.fontSize
       );
       const lineHeight = this.fontSize + 4.5;
-      const spaceAfter = 7;
+      const spaceAfter = 8;
       const contentHeight = runLines.length * lineHeight;
       const totalHeight = contentHeight + spaceAfter;
       return {
@@ -738,7 +777,7 @@ class PdfLayoutEngine {
 
     const lines = wrapText(text, maxW, this.fontRegular, this.fontSize);
     const lineHeight = this.fontSize + 4.5;
-    const spaceAfter = 7;
+    const spaceAfter = 8;
     const contentHeight = lines.length * lineHeight;
     const totalHeight = contentHeight + spaceAfter;
     return {
@@ -787,40 +826,60 @@ class PdfLayoutEngine {
         const depth = item.depth || 0;
         const isOrd = item.ordered !== undefined ? item.ordered : block.ordered;
         const itemIdx = item.index !== undefined ? item.index : idx + 1;
-        const bullet = isOrd ? `${itemIdx}. ` : '• ';
-        const bulletWidth = this.fontBold.widthOfTextAtSize(
-          safeWinAnsiText(bullet, this.fontBold),
-          this.fontSize
-        );
+        const bullet = isOrd ? `${itemIdx}. ` : '';
+        const bulletWidth = isOrd
+          ? this.fontBold.widthOfTextAtSize(safeWinAnsiText(bullet, this.fontBold), this.fontSize)
+          : 12;
         const text = item.text || htmlToText(item.html);
         const indentX = this.margin + 8 + depth * 16;
         const availW = this.contentWidth - (8 + depth * 16) - bulletWidth - 4;
-        const lines = wrapText(text, availW, this.fontRegular, this.fontSize);
+
+        let runLines = null;
+        let lines = [];
+        if (Array.isArray(item.runs) && item.runs.length > 0) {
+          runLines = wrapRuns(
+            item.runs,
+            availW,
+            this.fontRegular,
+            this.fontBold,
+            this.fontItalic,
+            this.fontMono,
+            this.fontSize
+          );
+        } else {
+          lines = wrapText(text, availW, this.fontRegular, this.fontSize);
+        }
+
         const lineHeight = this.fontSize + 4;
-        const itemH = lines.length * lineHeight + 3;
+        const numLines = runLines ? runLines.length : lines.length;
+        const itemH = numLines * lineHeight + 5.5;
         totalHeight += itemH;
         measuredItems.push({
+          isOrdered: Boolean(isOrd),
           bullet,
           bulletWidth,
           text,
           indentX,
           lines,
+          runLines,
           lineHeight,
           itemHeight: itemH
         });
       }
-      totalHeight += 6;
+      totalHeight += 8;
     } else {
       const raw = block.text || htmlToText(block.html);
       const lines = wrapText(raw, this.contentWidth, this.fontRegular, this.fontSize);
       const lineHeight = this.fontSize + 4;
-      totalHeight = lines.length * lineHeight + 6;
+      totalHeight = lines.length * lineHeight + 8;
       measuredItems.push({
+        isOrdered: false,
         bullet: '',
         bulletWidth: 0,
         text: raw,
         indentX: this.margin,
         lines,
+        runLines: null,
         lineHeight,
         itemHeight: totalHeight
       });
@@ -1214,8 +1273,12 @@ class PdfLayoutEngine {
 
   async renderList(block) {
     const m = this.measureList(block);
-    if (m.totalHeight <= this.availableHeight) {
-      for (const item of m.items) {
+    for (const item of m.items) {
+      if (!this.hasSpace(item.itemHeight)) {
+        this.addPage();
+      }
+
+      if (item.isOrdered) {
         if (item.bullet) {
           this.currentPage.drawText(safeWinAnsiText(item.bullet, this.fontBold), {
             x: item.indentX,
@@ -1225,43 +1288,40 @@ class PdfLayoutEngine {
             color: this.primaryColor
           });
         }
-        for (const l of item.lines) {
-          await this.drawTextLine(
-            l,
-            item.indentX + item.bulletWidth + 4,
+      } else {
+        // Draw crisp vector circle bullet
+        this.currentPage.drawCircle({
+          x: item.indentX + 4,
+          y: this.cursorY - this.fontSize / 2 + 1,
+          size: 2.2,
+          color: this.primaryColor
+        });
+      }
+
+      const contentX = item.indentX + item.bulletWidth + 4;
+
+      if (item.runLines && item.runLines.length > 0) {
+        for (const rLine of item.runLines) {
+          if (!this.hasSpace(item.lineHeight + 4)) {
+            this.addPage();
+          }
+          await this.renderRunLine(
+            rLine,
+            contentX,
             this.cursorY - this.fontSize,
-            this.fontSize,
-            this.fontRegular,
             this.textColor,
-            this.textColorHex,
-            false
+            this.textColorHex
           );
           this.cursorY -= item.lineHeight;
         }
-        this.cursorY -= 3;
-      }
-      this.cursorY -= 6;
-    } else {
-      for (const item of m.items) {
-        if (!this.hasSpace(item.itemHeight)) {
-          this.addPage();
-        }
-        if (item.bullet) {
-          this.currentPage.drawText(safeWinAnsiText(item.bullet, this.fontBold), {
-            x: item.indentX,
-            y: this.cursorY - this.fontSize,
-            size: this.fontSize,
-            font: this.fontBold,
-            color: this.primaryColor
-          });
-        }
+      } else {
         for (const l of item.lines) {
           if (!this.hasSpace(item.lineHeight + 4)) {
             this.addPage();
           }
           await this.drawTextLine(
             l,
-            item.indentX + item.bulletWidth + 4,
+            contentX,
             this.cursorY - this.fontSize,
             this.fontSize,
             this.fontRegular,
@@ -1271,10 +1331,10 @@ class PdfLayoutEngine {
           );
           this.cursorY -= item.lineHeight;
         }
-        this.cursorY -= 3;
       }
-      this.cursorY -= 6;
+      this.cursorY -= 5.5;
     }
+    this.cursorY -= 6;
   }
 
   async renderQuote(block) {
@@ -1319,16 +1379,17 @@ class PdfLayoutEngine {
       if (!this.hasSpace(row.rowHeight)) {
         this.addPage();
         if (!row.isHeader && headerRow) {
-          await this.renderTableRow(headerRow, m.colWidths);
+          await this.renderTableRow(headerRow, m.colWidths, false);
         }
       }
 
-      await this.renderTableRow(row, m.colWidths);
+      const isZebra = !row.isHeader && rIdx % 2 === 1;
+      await this.renderTableRow(row, m.colWidths, isZebra);
     }
-    this.cursorY -= 10;
+    this.cursorY -= 12;
   }
 
-  async renderTableRow(row, _colWidths) {
+  async renderTableRow(row, _colWidths, isZebra = false) {
     if (row.isHeader) {
       this.currentPage.drawRectangle({
         x: this.margin,
@@ -1337,10 +1398,43 @@ class PdfLayoutEngine {
         height: row.rowHeight,
         color: this.tableHeaderBg
       });
+    } else if (isZebra) {
+      this.currentPage.drawRectangle({
+        x: this.margin,
+        y: this.cursorY - row.rowHeight,
+        width: this.contentWidth,
+        height: row.rowHeight,
+        color: this.isDark ? rgb(0.14, 0.14, 0.18) : rgb(0.975, 0.985, 0.995)
+      });
     }
 
+    // Top horizontal border if header
+    if (row.isHeader) {
+      this.currentPage.drawLine({
+        start: { x: this.margin, y: this.cursorY },
+        end: { x: this.margin + this.contentWidth, y: this.cursorY },
+        thickness: 0.8,
+        color: this.borderColor
+      });
+    }
+
+    // Bottom horizontal border
     this.currentPage.drawLine({
       start: { x: this.margin, y: this.cursorY - row.rowHeight },
+      end: { x: this.margin + this.contentWidth, y: this.cursorY - row.rowHeight },
+      thickness: row.isHeader ? 1.2 : 0.6,
+      color: this.borderColor
+    });
+
+    // Outer left and right borders
+    this.currentPage.drawLine({
+      start: { x: this.margin, y: this.cursorY },
+      end: { x: this.margin, y: this.cursorY - row.rowHeight },
+      thickness: 0.8,
+      color: this.borderColor
+    });
+    this.currentPage.drawLine({
+      start: { x: this.margin + this.contentWidth, y: this.cursorY },
       end: { x: this.margin + this.contentWidth, y: this.cursorY - row.rowHeight },
       thickness: 0.8,
       color: this.borderColor
@@ -1349,8 +1443,18 @@ class PdfLayoutEngine {
     let currentX = this.margin;
     for (let cIdx = 0; cIdx < row.cells.length; cIdx++) {
       const cell = row.cells[cIdx];
-      const cellX = currentX + 5;
-      let lineY = this.cursorY - row.cellFontSize - 4;
+      const cellX = currentX + 6;
+      let lineY = this.cursorY - row.cellFontSize - 4.5;
+
+      // Draw vertical column divider line between columns
+      if (cIdx > 0) {
+        this.currentPage.drawLine({
+          start: { x: currentX, y: this.cursorY },
+          end: { x: currentX, y: this.cursorY - row.rowHeight },
+          thickness: 0.5,
+          color: this.borderColor
+        });
+      }
 
       for (const line of cell.lines) {
         await this.drawTextLine(
@@ -1362,13 +1466,70 @@ class PdfLayoutEngine {
           this.textColor,
           this.textColorHex,
           row.isHeader,
-          cell.width - 10
+          cell.width - 12
         );
-        lineY -= row.cellFontSize + 3;
+        lineY -= row.cellFontSize + 3.5;
       }
       currentX += cell.width;
     }
     this.cursorY -= row.rowHeight;
+  }
+
+  renderDivider() {
+    this.ensureSpace(18);
+    this.cursorY -= 8;
+    this.currentPage.drawLine({
+      start: { x: this.margin, y: this.cursorY },
+      end: { x: this.margin + this.contentWidth, y: this.cursorY },
+      thickness: 0.6,
+      color: this.borderColor
+    });
+    this.cursorY -= 10;
+  }
+
+  async renderThinking(block) {
+    const text = block.text || '';
+    if (!text.trim()) return;
+    this.ensureSpace(32);
+
+    await this.drawTextLine(
+      'Thought Process',
+      this.margin + 12,
+      this.cursorY - 10,
+      8.5,
+      this.fontBold,
+      this.mutedColor,
+      this.mutedColorHex,
+      true
+    );
+    this.cursorY -= 16;
+
+    const lines = wrapText(text, this.contentWidth - 24, this.fontItalic, this.fontSize - 1.5);
+    const lineHeight = this.fontSize - 1.5 + 3.5;
+
+    for (const l of lines) {
+      if (!this.hasSpace(lineHeight + 4)) {
+        this.addPage();
+      }
+      this.currentPage.drawLine({
+        start: { x: this.margin + 4, y: this.cursorY },
+        end: { x: this.margin + 4, y: this.cursorY - lineHeight },
+        thickness: 1.2,
+        color: this.borderColor
+      });
+      await this.drawTextLine(
+        l,
+        this.margin + 14,
+        this.cursorY - (this.fontSize - 1.5),
+        this.fontSize - 1.5,
+        this.fontItalic,
+        this.mutedColor,
+        this.mutedColorHex,
+        false
+      );
+      this.cursorY -= lineHeight;
+    }
+    this.cursorY -= 10;
   }
 
   async renderMath(block) {
@@ -1535,6 +1696,30 @@ export async function exportConversation(originalConversation, options = {}) {
 
   // Render Messages
   for (const msg of conv.messages) {
+    const hasBlocks =
+      Array.isArray(msg.blocks) &&
+      msg.blocks.some((b) => {
+        if (b.kind === 'paragraph' || b.kind === 'heading' || b.kind === 'quote') {
+          return (
+            (b.text && b.text.trim()) ||
+            (b.runs && b.runs.length > 0) ||
+            (b.html && b.html.trim())
+          );
+        }
+        if (b.kind === 'code') return b.code && b.code.trim();
+        if (b.kind === 'table') return b.rows && b.rows.length > 0;
+        if (b.kind === 'list') return b.items && b.items.length > 0;
+        if (b.kind === 'image') return b.src || b.dataUrl;
+        if (b.kind === 'attachment') return b.name;
+        if (b.kind === 'divider') return true;
+        if (b.kind === 'thinking') return b.text && b.text.trim();
+        return true;
+      });
+    const hasText = Boolean(msg.text && msg.text.trim());
+    if (!hasBlocks && !hasText) {
+      continue;
+    }
+
     const isUser = msg.role === 'user';
 
     if (isUser) {
@@ -1573,6 +1758,10 @@ export async function exportConversation(originalConversation, options = {}) {
             await layoutEngine.renderMath(block);
           } else if (block.kind === 'attachment') {
             await layoutEngine.renderAttachmentCard(block, false);
+          } else if (block.kind === 'divider') {
+            layoutEngine.renderDivider();
+          } else if (block.kind === 'thinking') {
+            await layoutEngine.renderThinking(block);
           } else if (block.kind === 'image' && (block.src || block.dataUrl)) {
             await layoutEngine.renderImage(block);
           } else {

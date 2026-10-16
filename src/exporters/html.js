@@ -34,6 +34,30 @@ function buildStandaloneHtml(conv, theme) {
 
   let messagesHtml = '';
   for (const m of conv.messages) {
+    const hasBlocks =
+      Array.isArray(m.blocks) &&
+      m.blocks.some((b) => {
+        if (b.kind === 'paragraph' || b.kind === 'heading' || b.kind === 'quote') {
+          return (
+            (b.text && b.text.trim()) ||
+            (b.runs && b.runs.length > 0) ||
+            (b.html && b.html.trim())
+          );
+        }
+        if (b.kind === 'code') return b.code && b.code.trim();
+        if (b.kind === 'table') return b.rows && b.rows.length > 0;
+        if (b.kind === 'list') return b.items && b.items.length > 0;
+        if (b.kind === 'image') return b.src || b.dataUrl;
+        if (b.kind === 'attachment') return b.name;
+        if (b.kind === 'divider') return true;
+        if (b.kind === 'thinking') return b.text && b.text.trim();
+        return true;
+      });
+    const hasText = Boolean(m.text && m.text.trim());
+    if (!hasBlocks && !hasText) {
+      continue;
+    }
+
     const isUser = m.role === 'user';
     const roleName = isUser ? 'User' : conv.model || 'Z.ai Assistant';
     const bubbleBg = isUser ? userBubble : botBubble;
@@ -51,7 +75,19 @@ function buildStandaloneHtml(conv, theme) {
           const hSize = block.level === 1 ? '22px' : block.level === 2 ? '18px' : '16px';
           contentHtml += `<h${block.level || 2} style="font-size:${hSize}; font-weight:700; margin:16px 0 8px 0; color:${text};">${escapeHtml(block.text || '')}</h${block.level || 2}>`;
         } else if (block.kind === 'list') {
-          contentHtml += `<div style="margin:10px 0;">${block.html}</div>`;
+          if (block.html) {
+            contentHtml += `<div style="margin:10px 0;">${block.html}</div>`;
+          } else if (Array.isArray(block.items)) {
+            const tag = block.ordered ? 'ol' : 'ul';
+            const lis = block.items
+              .map((it) => `<li>${it.html || escapeHtml(it.text || '')}</li>`)
+              .join('');
+            contentHtml += `<${tag} style="margin:10px 0;">${lis}</${tag}>`;
+          }
+        } else if (block.kind === 'divider') {
+          contentHtml += `<hr style="border:none; border-top:1px solid ${border}; margin:16px 0;" />`;
+        } else if (block.kind === 'attachment') {
+          contentHtml += `<div style="margin:10px 0; padding:10px 14px; border:1px solid ${border}; border-radius:8px; background:rgba(0,0,0,0.02); display:flex; align-items:center; gap:8px;"><span>${escapeHtml(block.icon || '📄')}</span><strong>${escapeHtml(block.name || 'Attachment')}</strong> <span style="font-size:12px; color:#6b7280;">(${escapeHtml(block.ext || 'FILE')}${block.size ? ' &bull; ' + escapeHtml(block.size) : ''})</span></div>`;
         } else if (block.kind === 'quote') {
           contentHtml += `<blockquote style="border-left:4px solid #4f46e5; padding-left:16px; margin:12px 0; color:#6b7280; font-style:italic;">${block.html || escapeHtml(block.text || '')}</blockquote>`;
         } else if (block.kind === 'image') {

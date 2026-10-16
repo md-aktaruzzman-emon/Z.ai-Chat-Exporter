@@ -3,6 +3,8 @@
  * Authoritative data model for Z.ai conversation export (Schema Version 2).
  */
 
+import { marked } from 'marked';
+
 export const SCHEMA_VERSION = 2;
 
 /**
@@ -240,10 +242,27 @@ export function computeStats(conversation) {
 export function parseHtmlToInlineRuns(htmlOrText) {
   if (!htmlOrText || typeof htmlOrText !== 'string') return [];
 
+  // Convert markdown syntax to HTML if markdown markers are detected
+  let processedHtml = htmlOrText;
+  const hasMarkdown = /[*_`~\[]/.test(htmlOrText);
+  if (hasMarkdown && (!htmlOrText.includes('<') || !htmlOrText.includes('>'))) {
+    try {
+      processedHtml = marked.parseInline(htmlOrText);
+    } catch {
+      // fallback
+    }
+  } else if (hasMarkdown && (!htmlOrText.includes('<strong') && !htmlOrText.includes('<b') && !htmlOrText.includes('<code'))) {
+    try {
+      processedHtml = marked.parseInline(htmlOrText);
+    } catch {
+      // fallback
+    }
+  }
+
   if (typeof DOMParser !== 'undefined') {
     try {
       const parser = new DOMParser();
-      const doc = parser.parseFromString(`<div>${htmlOrText}</div>`, 'text/html');
+      const doc = parser.parseFromString(`<div>${processedHtml}</div>`, 'text/html');
       const root = doc.body.firstElementChild || doc.body;
       const runs = [];
 
@@ -272,6 +291,11 @@ export function parseHtmlToInlineRuns(htmlOrText) {
             runs.push({ text: '\n' });
             return;
           }
+          const isBlock = ['p', 'div', 'li', 'tr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'].includes(tag);
+          if (isBlock && runs.length > 0 && !runs[runs.length - 1].text.endsWith('\n')) {
+            runs.push({ text: '\n' });
+          }
+
           const nextState = { ...state };
           if (tag === 'strong' || tag === 'b') nextState.bold = true;
           if (tag === 'em' || tag === 'i') nextState.italic = true;
@@ -280,6 +304,10 @@ export function parseHtmlToInlineRuns(htmlOrText) {
 
           for (const child of node.childNodes) {
             traverse(child, nextState);
+          }
+
+          if (isBlock && runs.length > 0 && !runs[runs.length - 1].text.endsWith('\n')) {
+            runs.push({ text: '\n' });
           }
         }
       }
@@ -291,7 +319,49 @@ export function parseHtmlToInlineRuns(htmlOrText) {
     }
   }
 
-  // Fallback for non-DOM or simple string
+  // Fallback for non-DOM / Node / test environments
+  try {
+    const runs = [];
+    const tokenRegex = /(<br\s*\/?>)|(<\/?(?:strong|b|em|i|code|a|p|div|li)[^>]*>)|([^<]+)/gi;
+    let state = { bold: false, italic: false, code: false, link: undefined };
+    let m;
+    while ((m = tokenRegex.exec(processedHtml)) !== null) {
+      if (m[1]) {
+        runs.push({ text: '\n' });
+      } else if (m[2]) {
+        const tagStr = m[2].toLowerCase();
+        if (tagStr.startsWith('</')) {
+          if (tagStr.startsWith('</strong') || tagStr.startsWith('</b')) state.bold = false;
+          else if (tagStr.startsWith('</em') || tagStr.startsWith('</i')) state.italic = false;
+          else if (tagStr.startsWith('</code')) state.code = false;
+          else if (tagStr.startsWith('</a')) state.link = undefined;
+          else if (tagStr.startsWith('</p') || tagStr.startsWith('</div') || tagStr.startsWith('</li')) {
+            if (runs.length > 0 && !runs[runs.length - 1].text.endsWith('\n')) runs.push({ text: '\n' });
+          }
+        } else {
+          if (tagStr.startsWith('<strong') || tagStr.startsWith('<b')) state.bold = true;
+          else if (tagStr.startsWith('<em') || tagStr.startsWith('<i')) state.italic = true;
+          else if (tagStr.startsWith('<code')) state.code = true;
+          else if (tagStr.startsWith('<a')) {
+            const hrefMatch = m[2].match(/href=["']([^"']*)["']/i);
+            state.link = hrefMatch ? hrefMatch[1] : undefined;
+          }
+        }
+      } else if (m[3]) {
+        runs.push({
+          text: m[3],
+          ...(state.bold ? { bold: true } : {}),
+          ...(state.italic ? { italic: true } : {}),
+          ...(state.code ? { code: true } : {}),
+          ...(state.link ? { link: state.link } : {})
+        });
+      }
+    }
+    if (runs.length > 0) return runs;
+  } catch {
+    // fallback
+  }
+
   const stripped = htmlOrText.replace(/<[^>]*>/g, '');
   return [{ text: stripped }];
 }
