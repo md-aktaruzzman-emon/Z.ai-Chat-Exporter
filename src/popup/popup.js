@@ -40,13 +40,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (isZai) {
     statusBox.className = 'status-box active';
-    statusBox.textContent = 'Active on Z.ai chat page. Ready to export.';
+    statusBox.innerHTML = `
+      <span class="status-pulse-dot"></span>
+      <div class="status-content">
+        <span class="status-title">Connected to Z.ai</span>
+        <span class="status-desc">Conversation detected & ready to export</span>
+      </div>
+    `;
     openBtn.disabled = false;
     quickBtns.forEach((btn) => (btn.disabled = false));
   } else {
     statusBox.className = 'status-box inactive';
-    statusBox.textContent =
-      'This extension operates on Z.ai (https://chat.z.ai). Open a Z.ai conversation to export.';
+    statusBox.innerHTML = `
+      <span class="status-pulse-dot"></span>
+      <div class="status-content">
+        <span class="status-title">Ready for Z.ai</span>
+        <span class="status-desc">Open a conversation on <strong>chat.z.ai</strong> to export</span>
+      </div>
+      <a href="https://chat.z.ai" target="_blank" rel="noopener noreferrer" class="status-link-btn" title="Open chat.z.ai in a new tab">Open ↗</a>
+    `;
     openBtn.disabled = true;
     quickBtns.forEach((btn) => (btn.disabled = true));
   }

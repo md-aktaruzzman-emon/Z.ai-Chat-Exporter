@@ -15,30 +15,35 @@
             <img
               src="../assets/icons/32.png"
               alt="Z.ai Logo"
-              width="30"
-              height="30"
-              style="border-radius: 7px; display: block"
+              width="26"
+              height="26"
+              class="brand-icon"
             />
           </div>
           <div class="brand-info">
-            <h1>Z.ai Exporter</h1>
-            <span class="badge">v2.1.0</span>
+            <div class="brand-title-wrap">
+              <h1 class="brand-title"><span class="title-gradient">Z.ai</span> Exporter</h1>
+              <span class="badge">v2.1.0</span>
+            </div>
+            <span class="brand-tagline">Save &bull; Organize &bull; Export</span>
           </div>
         </div>
         <button
           type="button"
           id="btn-open-options"
           class="icon-btn"
-          title="Open Settings"
+          title="Open Extension Settings"
           aria-label="Settings"
         >
           <svg
-            width="16"
-            height="16"
+            width="17"
+            height="17"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
           >
             <circle cx="12" cy="12" r="3" />
             <path
@@ -48,54 +53,165 @@
         </button>
       </header>
 
-      <!-- Status Indicator Box -->
+      <!-- Dynamic Status Card -->
       <div id="page-status-box" class="status-box">
-        <span class="status-dot"></span>
-        <span class="status-text">Checking active tab...</span>
+        <span class="status-pulse-dot"></span>
+        <div class="status-content">
+          <span class="status-title">Checking active tab...</span>
+          <span class="status-desc">Connecting to Z.ai page context</span>
+        </div>
       </div>
 
-      <!-- Main Action -->
+      <!-- Main Panel Action Button -->
       <div class="primary-action-wrap">
         <button type="button" id="btn-open-panel" class="btn btn-primary" disabled>
+          <div class="btn-left">
+            <svg
+              class="btn-icon"
+              width="17"
+              height="17"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M9 3v18" />
+              <path d="m14 9 3 3-3 3" />
+            </svg>
+            <span>Open Exporter Panel</span>
+          </div>
+          <kbd class="hotkey">Alt+Shift+E</kbd>
+        </button>
+      </div>
+
+      <!-- Quick 1-Click Export Section -->
+      <div class="quick-section">
+        <div class="section-header">
+          <span class="section-title">Quick 1-Click Export</span>
+          <span class="section-subtitle">Instant file download</span>
+        </div>
+        <div class="format-tiles">
+          <button
+            type="button"
+            class="btn-quick format-tile tile-pdf"
+            data-format="pdf"
+            title="Export as PDF Document"
+            disabled
+          >
+            <div class="tile-icon icon-pdf">
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+              >
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+              </svg>
+            </div>
+            <span class="tile-name">PDF</span>
+            <span class="tile-label">Document</span>
+          </button>
+
+          <button
+            type="button"
+            class="btn-quick format-tile tile-md"
+            data-format="md"
+            title="Export as Markdown"
+            disabled
+          >
+            <div class="tile-icon icon-md">
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+              >
+                <polyline points="4 7 4 4 20 4 20 7" />
+                <line x1="9" y1="20" x2="15" y2="20" />
+                <line x1="12" y1="4" x2="12" y2="20" />
+              </svg>
+            </div>
+            <span class="tile-name">MD</span>
+            <span class="tile-label">Markdown</span>
+          </button>
+
+          <button
+            type="button"
+            class="btn-quick format-tile tile-docx"
+            data-format="docx"
+            title="Export as Word Document"
+            disabled
+          >
+            <div class="tile-icon icon-docx">
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+              >
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+              </svg>
+            </div>
+            <span class="tile-name">DOC</span>
+            <span class="tile-label">Word</span>
+          </button>
+
+          <button
+            type="button"
+            class="btn-quick format-tile tile-json"
+            data-format="json"
+            title="Export as Raw JSON Data"
+            disabled
+          >
+            <div class="tile-icon icon-json">
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+              >
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
+              </svg>
+            </div>
+            <span class="tile-name">JSON</span>
+            <span class="tile-label">Raw Data</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Trust & Privacy Micro-Footer -->
+      <footer class="popup-footer">
+        <div class="footer-privacy">
           <svg
-            width="17"
-            height="17"
+            width="12"
+            height="12"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             stroke-width="2"
           >
-            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-            <polyline points="17 21 17 13 7 13 7 21" />
-            <polyline points="7 3 7 8 15 8" />
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
           </svg>
-          <span>Open Exporter Panel</span>
-          <kbd class="hotkey">Alt+Shift+E</kbd>
-        </button>
-      </div>
-
-      <!-- Quick Export Section -->
-      <div class="quick-section">
-        <div class="section-title">Quick 1-Click Export</div>
-        <div class="format-tiles">
-          <button type="button" class="btn-quick format-tile" data-format="pdf" disabled>
-            <div class="tile-icon icon-pdf">PDF</div>
-            <span class="tile-label">Document</span>
-          </button>
-          <button type="button" class="btn-quick format-tile" data-format="md" disabled>
-            <div class="tile-icon icon-md">MD</div>
-            <span class="tile-label">Markdown</span>
-          </button>
-          <button type="button" class="btn-quick format-tile" data-format="docx" disabled>
-            <div class="tile-icon icon-docx">DOC</div>
-            <span class="tile-label">Word</span>
-          </button>
-          <button type="button" class="btn-quick format-tile" data-format="json" disabled>
-            <div class="tile-icon icon-json">{ }</div>
-            <span class="tile-label">Raw Data</span>
-          </button>
+          <span>100% Client-Side &bull; Zero Cloud Upload</span>
         </div>
-      </div>
+      </footer>
     </div>
     <script type="module" src="./popup.js"></script>
   </body>

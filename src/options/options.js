@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const contextMenuCheckbox = document.getElementById('opt-context-menu');
 
   const saveBtn = document.getElementById('btn-save-settings');
+  const resetBtn = document.getElementById('btn-reset-defaults');
   const saveStatus = document.getElementById('save-status');
 
   const exportProfileBtn = document.getElementById('btn-export-profile');
@@ -165,6 +166,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     setTimeout(() => {
       saveToast.classList.add('hidden');
     }, 2800);
+  }
+
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      templateInput.value = DEFAULT_SETTINGS.template;
+      themeSelect.value = DEFAULT_SETTINGS.theme;
+      pdfEngineSelect.value = DEFAULT_SETTINGS.pdfEngine;
+      mdPresetSelect.value = DEFAULT_SETTINGS.mdPreset;
+      piiCheckbox.checked = DEFAULT_SETTINGS.anonymizePii;
+      historyCheckbox.checked = DEFAULT_SETTINGS.historyOptin;
+      applyTheme(DEFAULT_SETTINGS.theme);
+      updateLivePreview();
+      checkUnsavedChanges();
+      showToast('Settings reset to defaults. Click "Save Settings" to apply.');
+    });
   }
 
   saveBtn.addEventListener('click', async () => {
