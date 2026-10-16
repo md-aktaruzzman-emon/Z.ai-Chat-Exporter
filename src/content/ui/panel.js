@@ -415,14 +415,18 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
   // Selective Turn Controls
   if (btnSelectAll) {
     btnSelectAll.addEventListener('click', () => {
-      customMessagesContainer.querySelectorAll('.zaix-turn-cb').forEach((cb) => (cb.checked = true));
+      customMessagesContainer
+        .querySelectorAll('.zaix-turn-cb')
+        .forEach((cb) => (cb.checked = true));
       updateTurnCounter();
     });
   }
 
   if (btnSelectNone) {
     btnSelectNone.addEventListener('click', () => {
-      customMessagesContainer.querySelectorAll('.zaix-turn-cb').forEach((cb) => (cb.checked = false));
+      customMessagesContainer
+        .querySelectorAll('.zaix-turn-cb')
+        .forEach((cb) => (cb.checked = false));
       updateTurnCounter();
     });
   }
@@ -603,7 +607,8 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
         const row = document.createElement('label');
         row.className = 'zaix-checkbox-label zaix-turn-row';
         row.setAttribute('data-role', m.role || 'assistant');
-        row.style.cssText = 'font-size: 11.5px; padding: 4px 6px; border-radius: 4px; display: flex; align-items: center; gap: 6px; cursor: pointer; transition: background 0.15s ease;';
+        row.style.cssText =
+          'font-size: 11.5px; padding: 4px 6px; border-radius: 4px; display: flex; align-items: center; gap: 6px; cursor: pointer; transition: background 0.15s ease;';
 
         const snippet = (m.text || '').substring(0, 60).replace(/\n/g, ' ');
         const roleIcon = m.role === 'user' ? '👤' : '🤖';
@@ -616,7 +621,8 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
         cb.addEventListener('change', updateTurnCounter);
 
         const textSpan = document.createElement('span');
-        textSpan.style.cssText = 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;';
+        textSpan.style.cssText =
+          'overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;';
         const strong = document.createElement('strong');
         strong.textContent = `${roleIcon} #${m.index + 1}: `;
         textSpan.appendChild(strong);

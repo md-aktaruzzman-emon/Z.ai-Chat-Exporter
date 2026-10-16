@@ -15,7 +15,7 @@ import { KATEX_CSS } from '../core/katex-css.js';
 /**
  * Builds high-fidelity HTML markup with embedded KaTeX CSS and offline equations.
  */
-function buildRenderHtml(conv, theme) {
+export function buildRenderHtml(conv, theme) {
   const isDark = theme === 'dark';
   const bg = isDark ? '#111827' : '#ffffff';
   const text = isDark ? '#f3f4f6' : '#1e293b';
@@ -27,6 +27,28 @@ function buildRenderHtml(conv, theme) {
 
   let messagesHtml = '';
   for (const m of conv.messages) {
+    const hasBlocks =
+      Array.isArray(m.blocks) &&
+      m.blocks.some((b) => {
+        if (b.kind === 'paragraph' || b.kind === 'heading' || b.kind === 'quote') {
+          return (
+            (b.text && b.text.trim()) || (b.runs && b.runs.length > 0) || (b.html && b.html.trim())
+          );
+        }
+        if (b.kind === 'code') return b.code && b.code.trim();
+        if (b.kind === 'table') return b.rows && b.rows.length > 0;
+        if (b.kind === 'list') return b.items && b.items.length > 0;
+        if (b.kind === 'image') return b.src || b.dataUrl;
+        if (b.kind === 'attachment') return b.name;
+        if (b.kind === 'divider') return true;
+        if (b.kind === 'thinking') return b.text && b.text.trim();
+        return true;
+      });
+    const hasText = Boolean(m.text && m.text.trim());
+    if (!hasBlocks && !hasText) {
+      continue;
+    }
+
     const isUser = m.role === 'user';
     const roleName = isUser ? 'You' : conv.model || 'Z.ai Assistant';
     const bubbleBg = isUser ? userBg : botBg;
@@ -36,7 +58,7 @@ function buildRenderHtml(conv, theme) {
     if (Array.isArray(m.blocks) && m.blocks.length > 0) {
       for (const block of m.blocks) {
         if (block.kind === 'code') {
-          contentHtml += `<pre style="background: ${codeBg}; color: #f8fafc; padding: 12px 14px; border-radius: 6px; font-family: Consolas, monospace; font-size: 12px; line-height: 1.5; margin: 10px 0; overflow-x: auto; white-space: pre-wrap; word-break: break-word;"><code>${sanitizeHtml(block.code || '')}</code></pre>`;
+          contentHtml += `<pre style="background: ${codeBg}; color: #f8fafc; padding: 12px 14px; border-radius: 6px; font-family: Consolas, monospace; font-size: 12px; line-height: 1.5; margin: 10px 0; overflow-x: auto; white-space: pre-wrap; word-break: break-word; page-break-inside: avoid;"><code>${sanitizeHtml(block.code || '')}</code></pre>`;
         } else if (block.kind === 'math') {
           // Render via local KaTeX (zero external network / zero raw $$)
           const mathHtml = renderMathToHtml(block.tex || '', block.displayMode);
@@ -44,17 +66,32 @@ function buildRenderHtml(conv, theme) {
         } else if (block.kind === 'thinking') {
           contentHtml += `<div style="margin: 8px 0; padding: 10px 14px; background: rgba(100,116,139,0.08); border-left: 3px solid #94a3b8; border-radius: 4px; font-size: 12px; color: #64748b; font-style: italic;"><strong>Thinking Process:</strong> ${sanitizeHtml(block.text || '')}</div>`;
         } else if (block.kind === 'table') {
-          contentHtml += `<div style="overflow-x: auto; margin: 12px 0;">${block.html}</div>`;
+          contentHtml += `<div style="overflow-x: auto; margin: 12px 0; page-break-inside: avoid;" class="zaix-table-wrapper">${block.html}</div>`;
         } else if (block.kind === 'image') {
           const src = block.dataUrl || block.src || '';
-          contentHtml += `<div style="margin: 12px 0; text-align: center;"><img src="${src}" alt="${sanitizeHtml(block.alt || 'Image')}" style="max-width: 100%; height: auto; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);" /></div>`;
+          contentHtml += `<div style="margin: 12px 0; text-align: center; page-break-inside: avoid;"><img src="${src}" alt="${sanitizeHtml(block.alt || 'Image')}" style="max-width: 100%; height: auto; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);" /></div>`;
         } else if (block.kind === 'quote') {
           contentHtml += `<blockquote style="border-left: 4px solid #6366f1; padding-left: 14px; margin: 10px 0; color: #64748b; font-style: italic;">${block.html || sanitizeHtml(block.text || '')}</blockquote>`;
         } else if (block.kind === 'heading') {
           const hSize = block.level === 1 ? '20px' : block.level === 2 ? '17px' : '15px';
           contentHtml += `<h${block.level || 2} style="font-size: ${hSize}; font-weight: bold; margin: 14px 0 6px 0; color: ${text};">${sanitizeHtml(block.text || '')}</h${block.level || 2}>`;
         } else if (block.kind === 'list') {
-          contentHtml += `<div style="margin: 8px 0;">${block.html}</div>`;
+          if (block.html) {
+            contentHtml += `<div style="margin: 8px 0;">${block.html}</div>`;
+          } else if (Array.isArray(block.items)) {
+            const listTag = block.ordered ? 'ol' : 'ul';
+            const itemsHtml = block.items
+              .map((it) => `<li>${sanitizeHtml(it.text || '')}</li>`)
+              .join('');
+            contentHtml += `<${listTag} style="margin: 8px 0; padding-left: 20px;">${itemsHtml}</${listTag}>`;
+          }
+        } else if (block.kind === 'divider') {
+          contentHtml += `<hr style="border: none; border-top: 1px solid ${border}; margin: 16px 0;" />`;
+        } else if (block.kind === 'attachment') {
+          const sizePart = block.size ? ` (${sanitizeHtml(block.size)})` : '';
+          contentHtml += `<div style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; margin: 6px 0; background: ${isDark ? '#1e293b' : '#f8fafc'}; border: 1px solid ${border}; border-radius: 6px; font-size: 12px;"><span>${block.icon || '📎'}</span><span style="font-weight: 600;">${sanitizeHtml(block.name || 'Attachment')}</span><span style="color: #64748b;">${sizePart}</span></div>`;
+        } else if (block.kind === 'citation') {
+          contentHtml += `<div style="margin: 4px 0; font-size: 12px; color: #6366f1;">🔗 <a href="${sanitizeHtml(block.url || '')}" style="color: inherit; text-decoration: underline;" target="_blank">${sanitizeHtml(block.title || block.url || 'Source')}</a></div>`;
         } else {
           contentHtml +=
             block.html ||
@@ -68,7 +105,7 @@ function buildRenderHtml(conv, theme) {
     }
 
     messagesHtml += `
-      <div class="zaix-message-card" style="margin-bottom: 20px; padding: 16px 18px; border-radius: 10px; background: ${bubbleBg}; border: 1px solid ${border}; page-break-inside: avoid;">
+      <div class="zaix-message-card" style="margin-bottom: 20px; padding: 16px 18px; border-radius: 10px; background: ${bubbleBg}; border: 1px solid ${border};">
         <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px; color: ${roleColor};">${sanitizeHtml(roleName)}</div>
         <div style="line-height: 1.6; font-size: 13.5px;" class="zaix-message-body">${contentHtml}</div>
       </div>
@@ -89,7 +126,7 @@ function buildRenderHtml(conv, theme) {
         code { font-family: Consolas, monospace; font-size: 90%; background: rgba(100,116,139,0.12); padding: 2px 4px; border-radius: 3px; }
         pre code { background: none; padding: 0; }
         img, svg, canvas { max-width: 100%; height: auto; }
-        .zaix-message-card { page-break-inside: avoid; }
+        tr { page-break-inside: avoid; }
       </style>
       <div style="border-bottom: 2px solid ${border}; padding-bottom: 14px; margin-bottom: 24px;">
         <h1 style="font-size: 24px; font-weight: bold; margin: 0 0 6px 0; color: ${text};">${sanitizeHtml(conv.title)}</h1>

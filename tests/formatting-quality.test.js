@@ -12,6 +12,9 @@ import * as pdfVectorExporter from '../src/exporters/pdf-vector.js';
 import * as docxExporter from '../src/exporters/docx.js';
 import * as markdownExporter from '../src/exporters/markdown.js';
 import * as htmlExporter from '../src/exporters/html.js';
+import * as txtExporter from '../src/exporters/txt.js';
+import * as csvExporter from '../src/exporters/csv.js';
+import { buildRenderHtml } from '../src/exporters/pdf-raster.js';
 
 describe('Formatting Quality & Readability Verification', () => {
   it('preserves multiline whitespace and explicit line breaks in markdown paragraphs without flattening', () => {
@@ -41,7 +44,9 @@ describe('Formatting Quality & Readability Verification', () => {
 
     // Fifth block is conclusion
     expect(blocks[4].kind).toBe('paragraph');
-    expect(blocks[4].text).toContain('Conclusion\nThese requirements define the system\'s expected behavior.');
+    expect(blocks[4].text).toContain(
+      "Conclusion\nThese requirements define the system's expected behavior."
+    );
   });
 
   it('converts markdown inline syntax to structured runs in parseHtmlToInlineRuns', () => {
@@ -63,7 +68,8 @@ describe('Formatting Quality & Readability Verification', () => {
   });
 
   it('preserves line breaks between block elements like div and p in parseHtmlToInlineRuns', () => {
-    const htmlWithDivs = '<div>First line of question</div><div>Second line of question</div><p>Third line</p>';
+    const htmlWithDivs =
+      '<div>First line of question</div><div>Second line of question</div><p>Third line</p>';
     const runs = parseHtmlToInlineRuns(htmlWithDivs);
     const combinedText = runs.map((r) => r.text).join('');
 
@@ -107,7 +113,12 @@ describe('Formatting Quality & Readability Verification', () => {
         {
           role: 'assistant',
           text: 'Non-functional requirements specify criteria used to judge operation.',
-          blocks: [{ kind: 'paragraph', text: 'Non-functional requirements specify criteria used to judge operation.' }]
+          blocks: [
+            {
+              kind: 'paragraph',
+              text: 'Non-functional requirements specify criteria used to judge operation.'
+            }
+          ]
         },
         {
           role: 'assistant',
@@ -184,5 +195,187 @@ describe('Formatting Quality & Readability Verification', () => {
 
     const htmlRes = await htmlExporter.exportConversation(richConv);
     expect(htmlRes.blob.size).toBeGreaterThan(500);
+
+    const txtRes = await txtExporter.exportConversation(richConv);
+    expect(txtRes.previewText).toContain('[Thinking: Analyzing database indexes');
+    expect(txtRes.previewText).toContain('The analysis shows 99.9% uptime.');
+    expect(txtRes.previewText).toContain('---');
+
+    const csvRes = await csvExporter.exportConversation(richConv);
+    expect(csvRes.previewText).toContain('Analyze the system.');
+    expect(csvRes.previewText).toContain('The analysis shows 99.9% uptime.');
+  });
+
+  it('correctly extracts thinking/reasoning blocks and DOM structured elements via parseBlocks', () => {
+    const container = document.createElement('div');
+    container.innerHTML = `
+      <details class="thinking-wrapper">
+        <summary>Thinking Process</summary>
+        <p>I am calculating the optimal architecture for this system.</p>
+      </details>
+      <h3>System Architecture</h3>
+      <p>Here is the overview:</p>
+      <ul>
+        <li>Frontend UI</li>
+        <li>Backend Worker</li>
+      </ul>
+      <div class="file-card attachment">
+        <span class="file-name">spec.pdf</span>
+        <span class="file-size">2.4 MB</span>
+      </div>
+      <hr />
+    `;
+
+    const blocks = parseBlocks(container, { includeThinking: true });
+    expect(blocks.length).toBeGreaterThanOrEqual(5);
+
+    const thinkingBlock = blocks.find((b) => b.kind === 'thinking');
+    expect(thinkingBlock).toBeDefined();
+    expect(thinkingBlock.text).toContain('optimal architecture');
+
+    const headingBlock = blocks.find((b) => b.kind === 'heading');
+    expect(headingBlock).toBeDefined();
+    expect(headingBlock.text).toBe('System Architecture');
+
+    const listBlock = blocks.find((b) => b.kind === 'list');
+    expect(listBlock).toBeDefined();
+    expect(listBlock.items.length).toBe(2);
+
+    const attachmentBlock = blocks.find((b) => b.kind === 'attachment');
+    expect(attachmentBlock).toBeDefined();
+    expect(attachmentBlock.name).toContain('spec.pdf');
+
+    const dividerBlock = blocks.find((b) => b.kind === 'divider');
+    expect(dividerBlock).toBeDefined();
+  });
+
+  it('txt exporter structures lists, tables, dividers, attachments, and excludes empty ghost turns', async () => {
+    const testConv = {
+      title: 'TXT Structure Test',
+      model: 'Z.ai Test',
+      createdAt: new Date().toISOString(),
+      messages: [
+        {
+          role: 'user',
+          text: 'Show list and table',
+          blocks: [{ kind: 'paragraph', text: 'Show list and table' }]
+        },
+        {
+          role: 'assistant',
+          text: '',
+          blocks: [] // Empty ghost message that must be filtered
+        },
+        {
+          role: 'assistant',
+          text: 'Result:',
+          blocks: [
+            { kind: 'heading', level: 2, text: 'Capabilities' },
+            {
+              kind: 'list',
+              ordered: true,
+              items: [
+                { text: 'Item One', depth: 0 },
+                { text: 'Item Two', depth: 0 }
+              ]
+            },
+            {
+              kind: 'table',
+              rows: [
+                [{ text: 'Feature' }, { text: 'Status' }],
+                [{ text: 'Auth' }, { text: 'Active' }]
+              ]
+            },
+            { kind: 'divider' },
+            { kind: 'attachment', name: 'report.docx', size: '1.2 MB' }
+          ]
+        }
+      ]
+    };
+
+    const res = await txtExporter.exportConversation(testConv);
+    expect(res.previewText).toContain('## Capabilities');
+    expect(res.previewText).toContain('1. Item One');
+    expect(res.previewText).toContain('2. Item Two');
+    expect(res.previewText).toContain('| Feature | Status |');
+    expect(res.previewText).toContain('| --- | --- |');
+    expect(res.previewText).toContain('| Auth | Active |');
+    expect(res.previewText).toContain('---');
+    expect(res.previewText).toContain('[Attachment: report.docx (1.2 MB)]');
+
+    // Should only have 2 messages, not 3 (ghost message excluded)
+    const speakerMatches = res.previewText.match(/\[You\]|\[Z\.ai Test\]/g);
+    expect(speakerMatches.length).toBe(2);
+  });
+
+  it('csv exporter excludes ghost messages and derives fallback text from structured blocks', async () => {
+    const testConv = {
+      title: 'CSV Test',
+      model: 'Z.ai Test',
+      createdAt: new Date().toISOString(),
+      messages: [
+        {
+          role: 'user',
+          text: '',
+          blocks: [{ kind: 'attachment', name: 'uploaded.pdf', size: '500 KB' }]
+        },
+        {
+          role: 'assistant',
+          text: '',
+          blocks: [] // Ghost message
+        },
+        {
+          role: 'assistant',
+          text: 'Here is the response',
+          blocks: [{ kind: 'paragraph', text: 'Here is the response' }]
+        }
+      ]
+    };
+
+    const res = await csvExporter.exportConversation(testConv);
+    const lines = res.previewText.trim().split('\n');
+    // Header + 2 messages = 3 lines total
+    expect(lines.length).toBe(3);
+    expect(lines[1]).toContain('[Attachment: uploaded.pdf]');
+    expect(lines[2]).toContain('Here is the response');
+  });
+
+  it('pdf raster buildRenderHtml handles dividers, attachments, list fallback, and allows natural pagination', () => {
+    const testConv = {
+      title: 'Raster HTML Test',
+      model: 'Z.ai Model',
+      createdAt: new Date().toISOString(),
+      messages: [
+        {
+          role: 'assistant',
+          text: 'Content',
+          blocks: [
+            { kind: 'divider' },
+            { kind: 'attachment', name: 'document.pdf', size: '3.5 MB', icon: '📄' },
+            {
+              kind: 'list',
+              ordered: false,
+              items: [{ text: 'Bullet A' }, { text: 'Bullet B' }]
+            }
+          ]
+        },
+        {
+          role: 'assistant',
+          text: '',
+          blocks: [] // Ghost message
+        }
+      ]
+    };
+
+    const html = buildRenderHtml(testConv, 'light');
+    expect(html).toContain('<hr style="border: none; border-top: 1px solid');
+    expect(html).toContain('document.pdf');
+    expect(html).toContain('(3.5 MB)');
+    expect(html).toContain('<li>Bullet A</li>');
+    expect(html).toContain('<li>Bullet B</li>');
+    // Verify that .zaix-message-card does NOT enforce page-break-inside: avoid on the card
+    expect(html).not.toMatch(/class="zaix-message-card"[^>]*page-break-inside:\s*avoid/);
+    // Verify ghost message is excluded
+    const messageCards = html.match(/class="zaix-message-card"/g);
+    expect(messageCards.length).toBe(1);
   });
 });

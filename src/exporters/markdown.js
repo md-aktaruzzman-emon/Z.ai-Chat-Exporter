@@ -86,9 +86,7 @@ export async function exportConversation(originalConversation, options = {}) {
       msg.blocks.some((b) => {
         if (b.kind === 'paragraph' || b.kind === 'heading' || b.kind === 'quote') {
           return (
-            (b.text && b.text.trim()) ||
-            (b.runs && b.runs.length > 0) ||
-            (b.html && b.html.trim())
+            (b.text && b.text.trim()) || (b.runs && b.runs.length > 0) || (b.html && b.html.trim())
           );
         }
         if (b.kind === 'code') return b.code && b.code.trim();
@@ -158,7 +156,9 @@ export async function exportConversation(originalConversation, options = {}) {
         } else if (block.kind === 'divider') {
           lines.push('\n---\n');
         } else if (block.kind === 'attachment') {
-          lines.push(`📎 **Attachment:** \`${block.name || 'File'}\`${block.size ? ` (${block.size})` : ''}\n`);
+          lines.push(
+            `📎 **Attachment:** \`${block.name || 'File'}\`${block.size ? ` (${block.size})` : ''}\n`
+          );
         } else if (block.kind === 'table') {
           if (block.html) {
             lines.push(turndown.turndown(block.html) + '\n');

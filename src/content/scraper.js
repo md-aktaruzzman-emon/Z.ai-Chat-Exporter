@@ -18,7 +18,6 @@ import {
   parseHtmlToInlineRuns
 } from '../core/conversation-model.js';
 import { sanitizeHtml } from '../core/sanitize.js';
-import { marked } from 'marked';
 
 /**
  * Classifies the role of a message bubble element.
@@ -325,7 +324,18 @@ export function parseBlocks(element, options = {}) {
         }
 
         // 1. Thinking / Reasoning
-        if (node.matches?.('[class*="think" i], details[class*="reason" i], .reasoning-block')) {
+        const isThinking =
+          node.matches?.(
+            '[class*="think" i], [class*="thought" i], details[class*="reason" i], details[class*="think" i], .reasoning-block'
+          ) ||
+          (tag === 'details' &&
+            Boolean(
+              node
+                .querySelector?.('summary')
+                ?.textContent?.toLowerCase()
+                .match(/\b(think|thought|reasoning)\b/)
+            ));
+        if (isThinking) {
           flushInlineBuffer();
           if (includeThinking) {
             const text = node.textContent.trim();

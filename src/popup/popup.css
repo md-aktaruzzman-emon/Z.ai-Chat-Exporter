@@ -122,7 +122,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4), 0 0 8px rgba(6, 182, 212, 0.3);
+  box-shadow:
+    0 2px 8px rgba(99, 102, 241, 0.4),
+    0 0 8px rgba(6, 182, 212, 0.3);
 }
 
 .brand-info {

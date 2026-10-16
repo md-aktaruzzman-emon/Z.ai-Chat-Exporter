@@ -39,9 +39,7 @@ function buildStandaloneHtml(conv, theme) {
       m.blocks.some((b) => {
         if (b.kind === 'paragraph' || b.kind === 'heading' || b.kind === 'quote') {
           return (
-            (b.text && b.text.trim()) ||
-            (b.runs && b.runs.length > 0) ||
-            (b.html && b.html.trim())
+            (b.text && b.text.trim()) || (b.runs && b.runs.length > 0) || (b.html && b.html.trim())
           );
         }
         if (b.kind === 'code') return b.code && b.code.trim();

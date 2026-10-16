@@ -333,7 +333,7 @@ describe('6. Paged Document Layout Engine & Mandatory Overlap Prevention Tests',
 
   it('preserves exact line count, 4-space indentation, and blank lines for Python code in PDF & DOCX', async () => {
     const pythonCode =
-      'from django.shortcuts import render\n\ndef home(request):\n    posts = Post.objects.all()\n\n    return render(request, \'home.html\', {\n        \'posts\': posts\n    })';
+      "from django.shortcuts import render\n\ndef home(request):\n    posts = Post.objects.all()\n\n    return render(request, 'home.html', {\n        'posts': posts\n    })";
 
     const conv = {
       schemaVersion: 2,
@@ -623,6 +623,3 @@ describe('7. Full Conversation Collection & Virtualization Sentinel Tests', () =
     expect(docXml).toContain('SENTINEL_LAST_MESSAGE');
   });
 });
-
-
-

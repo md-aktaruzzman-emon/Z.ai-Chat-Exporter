@@ -48,7 +48,53 @@ export async function exportConversation(originalConversation, options = {}) {
   const rows = [headers.join(',')];
 
   for (const msg of conv.messages) {
-    const text = msg.text || '';
+    const hasBlocks =
+      Array.isArray(msg.blocks) &&
+      msg.blocks.some((b) => {
+        if (b.kind === 'paragraph' || b.kind === 'heading' || b.kind === 'quote') {
+          return (
+            (b.text && b.text.trim()) || (b.runs && b.runs.length > 0) || (b.html && b.html.trim())
+          );
+        }
+        if (b.kind === 'code') return b.code && b.code.trim();
+        if (b.kind === 'table') return b.rows && b.rows.length > 0;
+        if (b.kind === 'list') return b.items && b.items.length > 0;
+        if (b.kind === 'image') return b.src || b.dataUrl;
+        if (b.kind === 'attachment') return b.name;
+        if (b.kind === 'divider') return true;
+        if (b.kind === 'thinking') return b.text && b.text.trim();
+        return true;
+      });
+    const hasRawText = Boolean(msg.text && msg.text.trim());
+    if (!hasBlocks && !hasRawText) {
+      continue;
+    }
+
+    let text = msg.text || '';
+    if (hasBlocks) {
+      const blockText = msg.blocks
+        .map((b) => {
+          if (b.text) return b.text;
+          if (b.kind === 'code') return b.code || '';
+          if (b.kind === 'attachment') return `[Attachment: ${b.name || 'file'}]`;
+          if (b.kind === 'image') return `[Image: ${b.alt || 'diagram'}]`;
+          if (b.kind === 'table' && Array.isArray(b.rows)) {
+            return b.rows
+              .map((r) =>
+                (Array.isArray(r) ? r : [])
+                  .map((c) => (typeof c === 'string' ? c : c.text || ''))
+                  .join(' | ')
+              )
+              .join('; ');
+          }
+          return '';
+        })
+        .filter(Boolean)
+        .join(' ');
+      if (!text || blockText.length > text.length) {
+        text = blockText;
+      }
+    }
     const charCount = text.length;
     const words = text.trim().match(/\S+/g);
     const wordCount = words ? words.length : 0;

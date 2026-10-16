@@ -251,7 +251,12 @@ export function parseHtmlToInlineRuns(htmlOrText) {
     } catch {
       // fallback
     }
-  } else if (hasMarkdown && (!htmlOrText.includes('<strong') && !htmlOrText.includes('<b') && !htmlOrText.includes('<code'))) {
+  } else if (
+    hasMarkdown &&
+    !htmlOrText.includes('<strong') &&
+    !htmlOrText.includes('<b') &&
+    !htmlOrText.includes('<code')
+  ) {
     try {
       processedHtml = marked.parseInline(htmlOrText);
     } catch {
@@ -291,7 +296,19 @@ export function parseHtmlToInlineRuns(htmlOrText) {
             runs.push({ text: '\n' });
             return;
           }
-          const isBlock = ['p', 'div', 'li', 'tr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'].includes(tag);
+          const isBlock = [
+            'p',
+            'div',
+            'li',
+            'tr',
+            'h1',
+            'h2',
+            'h3',
+            'h4',
+            'h5',
+            'h6',
+            'blockquote'
+          ].includes(tag);
           if (isBlock && runs.length > 0 && !runs[runs.length - 1].text.endsWith('\n')) {
             runs.push({ text: '\n' });
           }
@@ -335,8 +352,13 @@ export function parseHtmlToInlineRuns(htmlOrText) {
           else if (tagStr.startsWith('</em') || tagStr.startsWith('</i')) state.italic = false;
           else if (tagStr.startsWith('</code')) state.code = false;
           else if (tagStr.startsWith('</a')) state.link = undefined;
-          else if (tagStr.startsWith('</p') || tagStr.startsWith('</div') || tagStr.startsWith('</li')) {
-            if (runs.length > 0 && !runs[runs.length - 1].text.endsWith('\n')) runs.push({ text: '\n' });
+          else if (
+            tagStr.startsWith('</p') ||
+            tagStr.startsWith('</div') ||
+            tagStr.startsWith('</li')
+          ) {
+            if (runs.length > 0 && !runs[runs.length - 1].text.endsWith('\n'))
+              runs.push({ text: '\n' });
           }
         } else {
           if (tagStr.startsWith('<strong') || tagStr.startsWith('<b')) state.bold = true;
