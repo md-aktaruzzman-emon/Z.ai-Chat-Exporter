@@ -11,8 +11,12 @@
  * 5. Structured message diagnostics logging ([ZAI STRUCTURE DEBUG])
  */
 
-import { locate, unvirtualize, waitForStreamEnd, ExportError } from './dom-engine.js';
-import { createEmptyConversation, computeStats } from '../core/conversation-model.js';
+import { locate, waitForStreamEnd, ExportError } from './dom-engine.js';
+import {
+  createEmptyConversation,
+  computeStats,
+  parseHtmlToInlineRuns
+} from '../core/conversation-model.js';
 import { sanitizeHtml } from '../core/sanitize.js';
 
 /**
@@ -136,7 +140,10 @@ export function extractAttachmentBlock(node) {
   if (
     isAttachmentClass ||
     (fileExtMatch &&
-      (text.includes('MB') || text.includes('KB') || text.includes('PDF') || text.includes('File')) &&
+      (text.includes('MB') ||
+        text.includes('KB') ||
+        text.includes('PDF') ||
+        text.includes('File')) &&
       text.length < 250)
   ) {
     const fileName = fileExtMatch ? fileExtMatch[1].trim() : text.split('\n')[0].trim();
@@ -160,18 +167,63 @@ export function extractAttachmentBlock(node) {
 
 // Selectors identifying block-level content in modern AI chat pages
 const BLOCK_TAGS = new Set([
-  'p', 'pre', 'table', 'ul', 'ol', 'blockquote', 'figure', 'svg', 'canvas',
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'details'
+  'p',
+  'pre',
+  'table',
+  'ul',
+  'ol',
+  'blockquote',
+  'figure',
+  'svg',
+  'canvas',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'hr',
+  'details'
 ]);
 
 const BLOCK_SELECTOR = [
-  'p', 'pre', 'table', 'ul', 'ol', 'blockquote', 'figure', 'svg', 'canvas', 'img',
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'details',
-  '[class*="think" i]', 'details[class*="reason" i]', '.reasoning-block',
-  '[class*="artifact" i]', '[class*="canvas" i]', '[class*="code-editor" i]',
-  '[class*="tool-call" i]', '[data-tool]', '.search-results-block', '[class*="search-results" i]',
-  '.katex-display', '.math-block', '[data-tex]',
-  '[class*="code-block" i]', '[class*="code_block" i]', '[class*="attachment" i]'
+  'p',
+  'pre',
+  'table',
+  'ul',
+  'ol',
+  'blockquote',
+  'figure',
+  'svg',
+  'canvas',
+  'img',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'hr',
+  'details',
+  '[role="table"]',
+  '[role="grid"]',
+  '[role="heading"]',
+  '[class*="think" i]',
+  'details[class*="reason" i]',
+  '.reasoning-block',
+  '[class*="artifact" i]',
+  '[class*="canvas" i]',
+  '[class*="code-editor" i]',
+  '[class*="tool-call" i]',
+  '[data-tool]',
+  '.search-results-block',
+  '[class*="search-results" i]',
+  '.katex-display',
+  '.math-block',
+  '[data-tex]',
+  '[class*="code-block" i]',
+  '[class*="code_block" i]',
+  '[class*="attachment" i]'
 ].join(', ');
 
 const IGNORED_TAGS = new Set(['button', 'style', 'script', 'noscript']);
@@ -190,14 +242,6 @@ const IGNORED_SELECTOR =
 export function parseBlocks(element, options = {}) {
   const { includeThinking = true, includeArtifacts = true, includeCitations = true } = options;
   const blocks = [];
-
-  function isBlockElement(node) {
-    if (!node || node.nodeType !== 1) return false;
-    const tag = node.tagName.toLowerCase();
-    if (BLOCK_TAGS.has(tag)) return true;
-    if (node.matches?.(BLOCK_SELECTOR)) return true;
-    return false;
-  }
 
   function processContainer(container) {
     if (!container) return;
@@ -237,7 +281,8 @@ export function parseBlocks(element, options = {}) {
               blocks.push({
                 kind: 'paragraph',
                 text: pt,
-                html: sanitizeHtml(pt.replace(/\n/g, '<br/>'))
+                html: sanitizeHtml(pt.replace(/\n/g, '<br/>')),
+                runs: parseHtmlToInlineRuns(pt)
               });
             }
           }
@@ -245,7 +290,8 @@ export function parseBlocks(element, options = {}) {
           blocks.push({
             kind: 'paragraph',
             text: trimmedText,
-            html: sanitizeHtml(wrapper.innerHTML)
+            html: sanitizeHtml(wrapper.innerHTML),
+            runs: parseHtmlToInlineRuns(wrapper.innerHTML)
           });
         }
       }
@@ -325,7 +371,9 @@ export function parseBlocks(element, options = {}) {
         }
 
         // 4. Artifacts / Canvas / Code Editor
-        if (node.matches?.('[class*="artifact" i], [class*="canvas" i], [class*="code-editor" i]')) {
+        if (
+          node.matches?.('[class*="artifact" i], [class*="canvas" i], [class*="code-editor" i]')
+        ) {
           flushInlineBuffer();
           if (includeArtifacts) {
             const title =
@@ -343,13 +391,9 @@ export function parseBlocks(element, options = {}) {
           const preEl = tag === 'pre' ? node : node.querySelector('pre') || node;
           const codeEl = preEl.querySelector('code') || preEl;
           let language = 'text';
-          const langMatch = (
-            node.className +
-            ' ' +
-            preEl.className +
-            ' ' +
-            codeEl.className
-          ).match(/language-([\w+-]+)/i);
+          const langMatch = (node.className + ' ' + preEl.className + ' ' + codeEl.className).match(
+            /language-([\w+-]+)/i
+          );
           if (langMatch) {
             language = langMatch[1].toLowerCase();
           }
@@ -380,25 +424,53 @@ export function parseBlocks(element, options = {}) {
           }
         }
 
-        // 7. Table with structured rows
-        if (tag === 'table') {
+        // 7. Table with structured rows (supports <table>, [role="table"], [role="grid"], and div table grids)
+        const isTable =
+          tag === 'table' ||
+          node.getAttribute?.('role') === 'table' ||
+          node.getAttribute?.('role') === 'grid' ||
+          (node.matches?.('[class*="table" i], [class*="grid" i]') &&
+            node.querySelector?.('tr, [role="row"], [class*="tr" i], [class*="row" i]'));
+
+        if (isTable) {
           flushInlineBuffer();
-          const trs = Array.from(node.querySelectorAll('tr'));
-          const rows = trs.map((tr) => {
-            return Array.from(tr.querySelectorAll('th, td')).map((cell) => ({
-              text: cell.textContent.trim(),
-              html: sanitizeHtml(cell.innerHTML),
-              isHeader: cell.tagName.toLowerCase() === 'th',
-              colspan: parseInt(cell.getAttribute('colspan') || '1', 10),
-              rowspan: parseInt(cell.getAttribute('rowspan') || '1', 10)
-            }));
-          });
-          blocks.push({
-            kind: 'table',
-            html: sanitizeHtml(node.outerHTML),
-            rows
-          });
-          continue;
+          const trs = Array.from(node.querySelectorAll('tr, [role="row"], [class*="table-row" i]'));
+          if (trs.length > 0) {
+            const rows = trs
+              .map((tr, rIdx) => {
+                const cells = Array.from(
+                  tr.querySelectorAll(
+                    'th, td, [role="columnheader"], [role="gridcell"], [role="cell"], [class*="table-cell" i]'
+                  )
+                );
+                return cells.map((cell) => {
+                  const cTag = cell.tagName ? cell.tagName.toLowerCase() : '';
+                  const isHeader =
+                    cTag === 'th' ||
+                    cell.getAttribute?.('role') === 'columnheader' ||
+                    cell.classList?.contains('th') ||
+                    rIdx === 0;
+                  return {
+                    text: cell.textContent.trim(),
+                    html: sanitizeHtml(cell.innerHTML),
+                    runs: parseHtmlToInlineRuns(cell.innerHTML),
+                    isHeader,
+                    colspan: parseInt(cell.getAttribute?.('colspan') || '1', 10),
+                    rowspan: parseInt(cell.getAttribute?.('rowspan') || '1', 10)
+                  };
+                });
+              })
+              .filter((r) => r.length > 0);
+
+            if (rows.length > 0) {
+              blocks.push({
+                kind: 'table',
+                html: sanitizeHtml(node.outerHTML),
+                rows
+              });
+              continue;
+            }
+          }
         }
 
         // 8. Canvas / Interactive Chart
@@ -463,15 +535,18 @@ export function parseBlocks(element, options = {}) {
           }
         }
 
-        // 11. Headings
-        if (/^h[1-6]$/.test(tag)) {
+        // 11. Headings (h1-h6 or role="heading")
+        if (/^h[1-6]$/.test(tag) || node.getAttribute?.('role') === 'heading') {
           flushInlineBuffer();
-          const level = parseInt(tag[1], 10);
+          const level = /^h[1-6]$/.test(tag)
+            ? parseInt(tag[1], 10)
+            : parseInt(node.getAttribute?.('aria-level') || '2', 10);
           blocks.push({
             kind: 'heading',
-            level,
+            level: Math.min(6, Math.max(1, level)),
             text: node.textContent.trim(),
-            html: sanitizeHtml(node.innerHTML)
+            html: sanitizeHtml(node.innerHTML),
+            runs: parseHtmlToInlineRuns(node.innerHTML)
           });
           continue;
         }
@@ -513,7 +588,13 @@ export function parseBlocks(element, options = {}) {
               items:
                 items.length > 0
                   ? items
-                  : [{ text: listNode.textContent.trim(), html: sanitizeHtml(listNode.innerHTML), depth }]
+                  : [
+                      {
+                        text: listNode.textContent.trim(),
+                        html: sanitizeHtml(listNode.innerHTML),
+                        depth
+                      }
+                    ]
             });
 
             for (const nl of nestedListsToEmit) {
@@ -564,7 +645,8 @@ export function parseBlocks(element, options = {}) {
           if (includeCitations) {
             const cites = node.querySelectorAll('a[class*="citation" i], sup[class*="cite" i]');
             for (const c of cites) {
-              const href = c.getAttribute('href') || c.querySelector('a')?.getAttribute('href') || '';
+              const href =
+                c.getAttribute('href') || c.querySelector('a')?.getAttribute('href') || '';
               const title = c.textContent.trim();
               if (href) {
                 blocks.push({ kind: 'citation', title, url: href });
@@ -575,7 +657,8 @@ export function parseBlocks(element, options = {}) {
           blocks.push({
             kind: 'paragraph',
             text: pText,
-            html: sanitizeHtml(node.outerHTML)
+            html: sanitizeHtml(node.outerHTML),
+            runs: parseHtmlToInlineRuns(node.innerHTML)
           });
           continue;
         }
@@ -594,7 +677,8 @@ export function parseBlocks(element, options = {}) {
             blocks.push({
               kind: 'paragraph',
               text,
-              html: sanitizeHtml(node.innerHTML)
+              html: sanitizeHtml(node.innerHTML),
+              runs: parseHtmlToInlineRuns(node.innerHTML)
             });
           }
         } else {
@@ -613,7 +697,8 @@ export function parseBlocks(element, options = {}) {
     blocks.push({
       kind: 'paragraph',
       text: element.textContent.trim(),
-      html: sanitizeHtml(element.innerHTML)
+      html: sanitizeHtml(element.innerHTML),
+      runs: parseHtmlToInlineRuns(element.innerHTML)
     });
   }
 
@@ -695,10 +780,13 @@ export function parseMarkdownToBlocks(markdown) {
     // 3. Heading
     const headingMatch = line.match(/^(#{1,6})\s+(.*)$/);
     if (headingMatch) {
+      const hText = headingMatch[2].trim();
       blocks.push({
         kind: 'heading',
         level: headingMatch[1].length,
-        text: headingMatch[2].trim()
+        text: hText,
+        html: sanitizeHtml(hText),
+        runs: parseHtmlToInlineRuns(hText)
       });
       i++;
       continue;
@@ -740,14 +828,36 @@ export function parseMarkdownToBlocks(markdown) {
         const cells = tLine
           .split('|')
           .slice(1, -1)
-          .map((c) => ({
-            text: c.trim(),
-            isHeader: rIdx === 0
-          }));
+          .map((c) => {
+            const cellText = c.trim();
+            return {
+              text: cellText,
+              html: sanitizeHtml(cellText),
+              runs: parseHtmlToInlineRuns(cellText),
+              isHeader: rIdx === 0
+            };
+          });
         if (cells.length > 0) rows.push(cells);
       });
       if (rows.length > 0) {
-        blocks.push({ kind: 'table', rows });
+        let tableHtml = '<table>';
+        const headerRows = rows.filter((r) => r.some((c) => c.isHeader));
+        const bodyRows = rows.filter((r) => !r.some((c) => c.isHeader));
+        if (headerRows.length > 0) {
+          tableHtml +=
+            '<thead>' +
+            headerRows
+              .map((r) => '<tr>' + r.map((c) => `<th>${c.html}</th>`).join('') + '</tr>')
+              .join('') +
+            '</thead>';
+        }
+        tableHtml +=
+          '<tbody>' +
+          (bodyRows.length > 0 ? bodyRows : rows)
+            .map((r) => '<tr>' + r.map((c) => `<td>${c.html}</td>`).join('') + '</tr>')
+            .join('') +
+          '</tbody></table>';
+        blocks.push({ kind: 'table', rows, html: tableHtml });
         continue;
       }
     }
@@ -762,14 +872,27 @@ export function parseMarkdownToBlocks(markdown) {
         const curOrd = /^\d+\.\s+(.*)$/.exec(curTrim);
         const curUnord = /^[-*+]\s+(.*)$/.exec(curTrim);
         if (curOrd && isOrdered) {
-          items.push({ text: curOrd[1].trim(), ordered: true, index: items.length + 1 });
+          const itemText = curOrd[1].trim();
+          items.push({
+            text: itemText,
+            html: sanitizeHtml(itemText),
+            ordered: true,
+            index: items.length + 1
+          });
           i++;
         } else if (curUnord && isUnordered) {
-          items.push({ text: curUnord[1].trim(), ordered: false, index: items.length + 1 });
+          const itemText = curUnord[1].trim();
+          items.push({
+            text: itemText,
+            html: sanitizeHtml(itemText),
+            ordered: false,
+            index: items.length + 1
+          });
           i++;
         } else if (lines[i].startsWith('   ') || lines[i].startsWith('\t')) {
           if (items.length > 0) {
             items[items.length - 1].text += ' ' + curTrim;
+            items[items.length - 1].html = sanitizeHtml(items[items.length - 1].text);
           }
           i++;
         } else {
@@ -804,7 +927,9 @@ export function parseMarkdownToBlocks(markdown) {
     if (paraText) {
       blocks.push({
         kind: 'paragraph',
-        text: paraText
+        text: paraText,
+        html: sanitizeHtml(paraText.replace(/\n/g, '<br/>')),
+        runs: parseHtmlToInlineRuns(paraText)
       });
     }
   }
@@ -820,24 +945,36 @@ export function parseMarkdownToBlocks(markdown) {
 export function logMessageStructure(msgObj) {
   const role = msgObj.role || 'assistant';
   const rawChars = (msgObj.text || '').length;
-  console.groupCollapsed(`[ZAI STRUCTURE DEBUG] role=${role} rawChars=${rawChars} id=${msgObj.id || 'msg'}`);
+  console.groupCollapsed(
+    `[ZAI STRUCTURE DEBUG] role=${role} rawChars=${rawChars} id=${msgObj.id || 'msg'}`
+  );
   console.log(`blocks count: ${(msgObj.blocks || []).length}`);
   (msgObj.blocks || []).forEach((b, idx) => {
     if (b.kind === 'heading') {
-      console.log(`${idx} heading level=${b.level} chars=${(b.text || '').length} text="${(b.text || '').substring(0, 50)}"`);
+      console.log(
+        `${idx} heading level=${b.level} chars=${(b.text || '').length} text="${(b.text || '').substring(0, 50)}"`
+      );
     } else if (b.kind === 'paragraph') {
-      console.log(`${idx} paragraph chars=${(b.text || '').length} preview="${(b.text || '').substring(0, 50)}"`);
+      console.log(
+        `${idx} paragraph chars=${(b.text || '').length} preview="${(b.text || '').substring(0, 50)}"`
+      );
     } else if (b.kind === 'list') {
-      console.log(`${idx} ${b.ordered ? 'ordered-list' : 'unordered-list'} items=${(b.items || []).length}`);
+      console.log(
+        `${idx} ${b.ordered ? 'ordered-list' : 'unordered-list'} items=${(b.items || []).length}`
+      );
     } else if (b.kind === 'code') {
       const lines = (b.code || '').split('\n').length;
-      console.log(`${idx} code language=${b.language || 'text'} lines=${lines} chars=${(b.code || '').length}`);
+      console.log(
+        `${idx} code language=${b.language || 'text'} lines=${lines} chars=${(b.code || '').length}`
+      );
     } else if (b.kind === 'table') {
       const rows = (b.rows || []).length;
       const cols = rows > 0 ? (b.rows[0] || []).length : 0;
       console.log(`${idx} table rows=${rows} cols=${cols}`);
     } else if (b.kind === 'math') {
-      console.log(`${idx} math displayMode=${b.displayMode} tex="${(b.tex || '').substring(0, 40)}"`);
+      console.log(
+        `${idx} math displayMode=${b.displayMode} tex="${(b.tex || '').substring(0, 40)}"`
+      );
     } else if (b.kind === 'attachment') {
       console.log(`${idx} attachment name="${b.name}" ext="${b.ext}" size="${b.size}"`);
     } else {
@@ -898,7 +1035,9 @@ export function extractConversationId(
     }
 
     // Check active chat anchor in sidebar
-    const activeLink = doc.querySelector('a[href*="/c/"][class*="active" i], a[href*="/c/"][aria-selected="true"]');
+    const activeLink = doc.querySelector(
+      'a[href*="/c/"][class*="active" i], a[href*="/c/"][aria-selected="true"]'
+    );
     if (activeLink) {
       const href = activeLink.getAttribute('href') || '';
       const m = href.match(/\/c\/([a-zA-Z0-9_\-]+)/i);
@@ -917,7 +1056,7 @@ export function extractConversationId(
  * @param {Object} [options]
  * @returns {Promise<import('../core/conversation-model.js').Conversation|null>}
  */
-export async function fetchConversationFromApi(conversationId, options = {}) {
+export async function fetchConversationFromApi(conversationId, _options = {}) {
   if (!conversationId || typeof fetch !== 'function') return null;
 
   const candidateEndpoints = [
@@ -1036,9 +1175,10 @@ export class FullConversationCollector {
    * Generates a stable identity/fingerprint for a message bubble element.
    * @param {Element} bubble
    * @param {string} role
+   * @param {string} [prevId]
    * @returns {string}
    */
-  getMessageIdentity(bubble, role) {
+  getMessageIdentity(bubble, role, prevId = '') {
     if (!bubble) return `${role}:${Date.now()}:${Math.random()}`;
 
     // 1. Explicit DOM attributes
@@ -1051,13 +1191,24 @@ export class FullConversationCollector {
       return explicitId;
     }
 
-    // 2. Content-based deterministic fingerprint
+    // 2. Position or index attributes
+    const explicitIndex =
+      bubble.getAttribute('data-index') ||
+      bubble.getAttribute('data-message-index') ||
+      bubble.getAttribute('aria-posinset') ||
+      bubble.getAttribute('data-turn');
+    if (explicitIndex) {
+      return `${role}:${explicitIndex}`;
+    }
+
+    // 3. Content-based deterministic fingerprint with preceding turn context
     const text = bubble.textContent?.trim() || '';
     const textLen = text.length;
     const startStr = text.substring(0, 45).replace(/\s+/g, ' ');
     const endStr = text.substring(Math.max(0, textLen - 45)).replace(/\s+/g, ' ');
 
-    return `${role}:${textLen}:${startStr}:${endStr}`;
+    const base = `${role}:${textLen}:${startStr}:${endStr}`;
+    return prevId ? `${base}__after_${prevId.substring(0, 24)}` : base;
   }
 
   /**
@@ -1071,11 +1222,13 @@ export class FullConversationCollector {
     let newCount = 0;
 
     const currentMountedIds = [];
+    let lastId = '';
     for (let idx = 0; idx < bubbles.length; idx++) {
       const bubble = bubbles[idx];
       const role = classifyRole(bubble, idx);
-      const msgId = this.getMessageIdentity(bubble, role);
+      const msgId = this.getMessageIdentity(bubble, role, lastId);
       currentMountedIds.push(msgId);
+      lastId = msgId;
     }
 
     for (let idx = 0; idx < bubbles.length; idx++) {
@@ -1132,7 +1285,7 @@ export class FullConversationCollector {
    * Runs the full bi-directional incremental scrolling & accumulation loop.
    */
   async collectAll(container, options = {}) {
-    const { maxScrollAttempts = 30, settleDelayMs = 250 } = options;
+    const { maxScrollAttempts = 80, settleDelayMs = 250 } = options;
 
     // Initial scan
     this.collectMountedBubbles(options);
@@ -1161,7 +1314,10 @@ export class FullConversationCollector {
       if (container === document.body || container === document.documentElement) {
         if (typeof window !== 'undefined') window.scrollBy(0, -600);
       } else {
-        container.scrollTop = Math.max(0, container.scrollTop - Math.max(container.clientHeight * 0.85, 350));
+        container.scrollTop = Math.max(
+          0,
+          container.scrollTop - Math.max(container.clientHeight * 0.85, 350)
+        );
       }
       container.dispatchEvent(new Event('scroll', { bubbles: true }));
 
@@ -1202,7 +1358,8 @@ export class FullConversationCollector {
 
       const res = this.collectMountedBubbles(options);
 
-      const isAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 10;
+      const isAtBottom =
+        container.scrollTop + container.clientHeight >= container.scrollHeight - 10;
       const scrollMoved = container.scrollTop !== currentTop;
 
       if (res.newCount > 0) {
@@ -1270,11 +1427,15 @@ export async function scrapeConversation(options = {}) {
   // Section 6 & 7: Prefer authenticated API data over virtualized DOM
   const conversationId = extractConversationId();
   if (conversationId && !forceDom) {
-    console.log(`[ZAI DATA PIPELINE] Detected conversation ID "${conversationId}". Attempting authenticated API retrieval...`);
+    console.log(
+      `[ZAI DATA PIPELINE] Detected conversation ID "${conversationId}". Attempting authenticated API retrieval...`
+    );
     try {
       const apiConversation = await fetchConversationFromApi(conversationId, options);
       if (apiConversation && apiConversation.messages && apiConversation.messages.length > 0) {
-        console.log(`[ZAI DATA PIPELINE] Authenticated API retrieval succeeded! ${apiConversation.messages.length} messages retrieved with zero virtualization loss.`);
+        console.log(
+          `[ZAI DATA PIPELINE] Authenticated API retrieval succeeded! ${apiConversation.messages.length} messages retrieved with zero virtualization loss.`
+        );
 
         let filteredMessages = apiConversation.messages;
         if (Array.isArray(selectedIndices) && selectedIndices.length > 0) {
@@ -1290,7 +1451,10 @@ export async function scrapeConversation(options = {}) {
         return apiConversation;
       }
     } catch (apiErr) {
-      console.warn('[ZAI DATA PIPELINE] API retrieval attempt failed, falling back to DOM collector:', apiErr);
+      console.warn(
+        '[ZAI DATA PIPELINE] API retrieval attempt failed, falling back to DOM collector:',
+        apiErr
+      );
     }
   }
 
@@ -1339,9 +1503,12 @@ export async function scrapeConversation(options = {}) {
   const userCount = rawMessages.filter((m) => m.role === 'user').length;
   const assistantCount = rawMessages.filter((m) => m.role === 'assistant').length;
   const firstPreview = rawMessages[0]?.text.substring(0, 45).replace(/\n/g, ' ') || '';
-  const lastPreview = rawMessages[rawMessages.length - 1]?.text.substring(0, 45).replace(/\n/g, ' ') || '';
+  const lastPreview =
+    rawMessages[rawMessages.length - 1]?.text.substring(0, 45).replace(/\n/g, ' ') || '';
 
-  console.log(`[ZAI EXPORT] Full collection complete: ${rawMessages.length} unique messages collected.`);
+  console.log(
+    `[ZAI EXPORT] Full collection complete: ${rawMessages.length} unique messages collected.`
+  );
   console.log(`[ZAI EXPORT] User messages: ${userCount}, Assistant messages: ${assistantCount}`);
   console.log(`[ZAI EXPORT] First message: "${firstPreview}"`);
   console.log(`[ZAI EXPORT] Last message: "${lastPreview}"`);

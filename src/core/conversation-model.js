@@ -6,18 +6,27 @@
 export const SCHEMA_VERSION = 2;
 
 /**
+ * @typedef {Object} InlineRun
+ * @property {string} text
+ * @property {boolean} [bold]
+ * @property {boolean} [italic]
+ * @property {boolean} [code]
+ * @property {string} [link]
+ *
  * @typedef {'paragraph'|'heading'|'code'|'table'|'image'|'math'|'list'|'quote'|'thinking'|'artifact'|'citation'|'toolCall'|'searchResult'|'attachment'} BlockKind
  *
  * @typedef {Object} ParagraphBlock
  * @property {'paragraph'} kind
  * @property {string} [text]
  * @property {string} html
+ * @property {InlineRun[]} [runs]
  *
  * @typedef {Object} HeadingBlock
  * @property {'heading'} kind
  * @property {1|2|3|4|5|6} level
  * @property {string} text
  * @property {string} [html]
+ * @property {InlineRun[]} [runs]
  *
  * @typedef {Object} CodeBlock
  * @property {'code'} kind
@@ -25,10 +34,19 @@ export const SCHEMA_VERSION = 2;
  * @property {string} code
  * @property {string} [highlightedHtml]
  *
+ * @typedef {Object} TableCell
+ * @property {string} text
+ * @property {string} [html]
+ * @property {InlineRun[]} [runs]
+ * @property {boolean} [isHeader]
+ * @property {number} [colspan]
+ * @property {number} [rowspan]
+ * @property {string} [align]
+ *
  * @typedef {Object} TableBlock
  * @property {'table'} kind
  * @property {string} html
- * @property {Array<Array<{text: string, html?: string, isHeader?: boolean, colspan?: number, rowspan?: number, align?: string}>>} [rows]
+ * @property {Array<Array<TableCell>>} [rows]
  *
  * @typedef {Object} ImageBlock
  * @property {'image'} kind
@@ -210,4 +228,70 @@ export function computeStats(conversation) {
     images: imagesCount,
     tables: tablesCount
   };
+}
+
+/**
+ * Parses an HTML string or plain text snippet into structured InlineRun objects,
+ * retaining bold, italic, inline code formatting, and hyperlinks.
+ *
+ * @param {string} htmlOrText
+ * @returns {InlineRun[]}
+ */
+export function parseHtmlToInlineRuns(htmlOrText) {
+  if (!htmlOrText || typeof htmlOrText !== 'string') return [];
+
+  if (typeof DOMParser !== 'undefined') {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(`<div>${htmlOrText}</div>`, 'text/html');
+      const root = doc.body.firstElementChild || doc.body;
+      const runs = [];
+
+      function traverse(
+        node,
+        state = { bold: false, italic: false, code: false, link: undefined }
+      ) {
+        if (node.nodeType === 3) {
+          // Text node
+          const text = node.textContent;
+          if (text) {
+            runs.push({
+              text,
+              ...(state.bold ? { bold: true } : {}),
+              ...(state.italic ? { italic: true } : {}),
+              ...(state.code ? { code: true } : {}),
+              ...(state.link ? { link: state.link } : {})
+            });
+          }
+          return;
+        }
+
+        if (node.nodeType === 1) {
+          const tag = node.tagName.toLowerCase();
+          if (tag === 'br') {
+            runs.push({ text: '\n' });
+            return;
+          }
+          const nextState = { ...state };
+          if (tag === 'strong' || tag === 'b') nextState.bold = true;
+          if (tag === 'em' || tag === 'i') nextState.italic = true;
+          if (tag === 'code') nextState.code = true;
+          if (tag === 'a') nextState.link = node.getAttribute('href') || undefined;
+
+          for (const child of node.childNodes) {
+            traverse(child, nextState);
+          }
+        }
+      }
+
+      traverse(root);
+      if (runs.length > 0) return runs;
+    } catch {
+      // fallback
+    }
+  }
+
+  // Fallback for non-DOM or simple string
+  const stripped = htmlOrText.replace(/<[^>]*>/g, '');
+  return [{ text: stripped }];
 }

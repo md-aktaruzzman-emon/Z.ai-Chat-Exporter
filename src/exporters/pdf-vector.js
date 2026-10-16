@@ -313,6 +313,156 @@ function wrapText(text, maxWidth, font, fontSize) {
 }
 
 /**
+ * Splits inline runs into lines of formatted segments fitting maxWidth.
+ * Handles bold, italic, code, links, whitespace, and complex Unicode word metrics.
+ * @param {import('../core/conversation-model.js').InlineRun[]} runs
+ * @param {number} maxWidth
+ * @param {import('pdf-lib').PDFFont} fontRegular
+ * @param {import('pdf-lib').PDFFont} fontBold
+ * @param {import('pdf-lib').PDFFont} fontItalic
+ * @param {import('pdf-lib').PDFFont} fontMono
+ * @param {number} fontSize
+ * @returns {Array<Array<{text: string, font: import('pdf-lib').PDFFont, size: number, isBold: boolean, isItalic: boolean, isCode: boolean, link?: string, width: number}>>}
+ */
+function wrapRuns(runs, maxWidth, fontRegular, fontBold, fontItalic, fontMono, fontSize) {
+  if (!Array.isArray(runs) || runs.length === 0) return [];
+
+  const measureToken = (text, font, size) => {
+    if (hasComplexUnicode(text)) {
+      return Math.min(Math.max(text.length * size * 0.75, 12), maxWidth);
+    }
+    try {
+      return font.widthOfTextAtSize(safeWinAnsiText(text, font), size);
+    } catch {
+      return text.length * (size * 0.55);
+    }
+  };
+
+  // 1. Flatten runs into token list with paragraph boundary indicators
+  const paragraphs = [[]];
+  for (const run of runs) {
+    const rawText = run.text || '';
+    if (!rawText) continue;
+
+    const font = run.code
+      ? fontMono
+      : run.bold && run.italic
+        ? fontBold
+        : run.bold
+          ? fontBold
+          : run.italic
+            ? fontItalic
+            : fontRegular;
+    const size = run.code ? fontSize * 0.88 : fontSize;
+
+    // Split run text by newlines
+    const parts = rawText.split('\n');
+    for (let pIdx = 0; pIdx < parts.length; pIdx++) {
+      if (pIdx > 0) {
+        paragraphs.push([]);
+      }
+      const part = parts[pIdx];
+      if (!part) continue;
+
+      // Tokenize by word / whitespace boundaries
+      const regex = /(\s+|[^\s]+)/g;
+      let match;
+      while ((match = regex.exec(part)) !== null) {
+        const tokenStr = match[0];
+        const isWhitespace = /^\s+$/.test(tokenStr);
+        const tokenWidth = measureToken(tokenStr, font, size);
+        paragraphs[paragraphs.length - 1].push({
+          text: tokenStr,
+          isWhitespace,
+          font,
+          size,
+          isBold: Boolean(run.bold),
+          isItalic: Boolean(run.italic),
+          isCode: Boolean(run.code),
+          link: run.link,
+          width: tokenWidth
+        });
+      }
+    }
+  }
+
+  // 2. Wrap each paragraph's tokens into lines
+  const allLines = [];
+  for (const paraTokens of paragraphs) {
+    if (paraTokens.length === 0) {
+      allLines.push([]);
+      continue;
+    }
+
+    let currentLine = [];
+    let currentLineWidth = 0;
+
+    for (const token of paraTokens) {
+      if (token.isWhitespace) {
+        if (currentLine.length === 0) {
+          continue;
+        }
+        if (currentLineWidth + token.width <= maxWidth) {
+          currentLine.push(token);
+          currentLineWidth += token.width;
+        }
+        continue;
+      }
+
+      // Word token
+      if (currentLineWidth + token.width <= maxWidth) {
+        currentLine.push(token);
+        currentLineWidth += token.width;
+      } else {
+        if (token.width > maxWidth) {
+          if (currentLine.length > 0) {
+            allLines.push(currentLine);
+            currentLine = [];
+            currentLineWidth = 0;
+          }
+          let remaining = token.text;
+          while (
+            measureToken(remaining, token.font, token.size) > maxWidth &&
+            remaining.length > 2
+          ) {
+            let sliceLen = Math.max(1, Math.floor(remaining.length * 0.7));
+            while (
+              sliceLen > 1 &&
+              measureToken(remaining.substring(0, sliceLen), token.font, token.size) > maxWidth
+            ) {
+              sliceLen--;
+            }
+            const chunk = remaining.substring(0, sliceLen);
+            const chunkW = measureToken(chunk, token.font, token.size);
+            allLines.push([{ ...token, text: chunk, width: chunkW }]);
+            remaining = remaining.substring(sliceLen);
+          }
+          if (remaining) {
+            const remW = measureToken(remaining, token.font, token.size);
+            currentLine.push({ ...token, text: remaining, width: remW });
+            currentLineWidth = remW;
+          }
+        } else {
+          if (currentLine.length > 0) {
+            allLines.push(currentLine);
+            currentLine = [];
+            currentLineWidth = 0;
+          }
+          currentLine.push(token);
+          currentLineWidth = token.width;
+        }
+      }
+    }
+
+    if (currentLine.length > 0) {
+      allLines.push(currentLine);
+    }
+  }
+
+  return allLines;
+}
+
+/**
  * Creates an SVG data URL for a text string that contains complex Unicode (e.g. Bengali).
  */
 function createUnicodeTextSvgDataUrl(text, fontSize, colorHex, isBold, maxWidth) {
@@ -374,8 +524,9 @@ class PdfLayoutEngine {
 
     this.fontRegular = options.fontRegular;
     this.fontBold = options.fontBold;
+    this.fontItalic = options.fontItalic || options.fontRegular;
     this.fontMono = options.fontMono;
-    this.fontSize = options.fontSize || 10;
+    this.fontSize = options.fontSize || 10.5;
 
     this.pages = [];
     this.currentPage = null;
@@ -419,24 +570,30 @@ class PdfLayoutEngine {
     return false;
   }
 
-  async drawTextLine(text, x, curY, size, font, color, colorHex, isBold = false) {
+  async drawTextLine(
+    text,
+    x,
+    curY,
+    size,
+    font,
+    color,
+    colorHex,
+    isBold = false,
+    maxWidth = this.contentWidth
+  ) {
     if (!text) return;
     if (hasComplexUnicode(text)) {
       try {
-        const svgData = createUnicodeTextSvgDataUrl(text, size, colorHex, isBold, this.contentWidth);
+        const svgData = createUnicodeTextSvgDataUrl(text, size, colorHex, isBold, maxWidth);
         const convResult = await imageSourceToPngBytes(svgData);
         if (convResult && convResult.bytes) {
           const img = await this.pdfDoc.embedPng(convResult.bytes);
-          const fitted = fitDimensions(
-            convResult.width,
-            convResult.height,
-            this.contentWidth,
-            size * 1.5
-          );
+          const fitted = fitDimensions(convResult.width, convResult.height, maxWidth, size * 1.5);
           // Baseline alignment: align SVG text baseline with standard font baseline curY
+          const baselineOffset = fitted.height * 0.233;
           this.currentPage.drawImage(img, {
             x,
-            y: curY - fitted.height * 0.35,
+            y: curY - baselineOffset,
             width: fitted.width,
             height: fitted.height
           });
@@ -457,33 +614,142 @@ class PdfLayoutEngine {
     });
   }
 
+  async renderRunLine(lineSegments, x, curY, defaultColor, defaultColorHex) {
+    let curX = x;
+    for (const seg of lineSegments) {
+      if (!seg.text) continue;
+      const segColor = seg.isCode
+        ? this.isDark
+          ? rgb(0.85, 0.9, 0.95)
+          : rgb(0.2, 0.25, 0.35)
+        : seg.link
+          ? rgb(0.15, 0.39, 0.92)
+          : defaultColor;
+      const segColorHex = seg.isCode
+        ? this.isDark
+          ? '#e2e8f0'
+          : '#334155'
+        : seg.link
+          ? '#2563eb'
+          : defaultColorHex;
+
+      await this.drawTextLine(
+        seg.text,
+        curX,
+        curY,
+        seg.size,
+        seg.font,
+        segColor,
+        segColorHex,
+        seg.isBold,
+        seg.width + 10
+      );
+      curX += seg.width;
+    }
+  }
+
   // --- Block Measurements ---
 
   measureHeading(block, offset = 0) {
-    const hSize =
-      block.level === 1 ? this.fontSize + 4 : block.level === 2 ? this.fontSize + 2.5 : this.fontSize + 1.5;
+    let hSize = 13;
+    let spaceBefore = 10;
+    let spaceAfter = 5;
+    let lineHeight = 17;
+    if (block.level === 1) {
+      hSize = 18;
+      lineHeight = 22;
+      spaceBefore = 14;
+      spaceAfter = 8;
+    } else if (block.level === 2) {
+      hSize = 15;
+      lineHeight = 19;
+      spaceBefore = 12;
+      spaceAfter = 6;
+    } else if (block.level === 3) {
+      hSize = 13;
+      lineHeight = 17;
+      spaceBefore = 10;
+      spaceAfter = 5;
+    } else {
+      hSize = 11;
+      lineHeight = 15;
+      spaceBefore = 8;
+      spaceAfter = 4;
+    }
+
     const hText = block.text || htmlToText(block.html) || '';
     const maxW = this.contentWidth - offset;
     const lines = wrapText(hText, maxW, this.fontBold, hSize);
-    const lineHeight = hSize + 4;
-    const spaceBefore = 10;
-    const spaceAfter = 6;
     const contentHeight = lines.length * lineHeight;
     const totalHeight = spaceBefore + contentHeight + spaceAfter;
     const keepWithNextMin = 35;
-    return { kind: 'heading', hSize, lines, lineHeight, spaceBefore, spaceAfter, contentHeight, totalHeight, keepWithNextMin };
+    return {
+      kind: 'heading',
+      hSize,
+      lines,
+      lineHeight,
+      spaceBefore,
+      spaceAfter,
+      contentHeight,
+      totalHeight,
+      keepWithNextMin
+    };
   }
 
-  measureParagraph(rawText, offset = 0) {
-    const text = rawText || '';
-    if (!text.trim()) return { kind: 'paragraph', lines: [], totalHeight: 0 };
+  measureParagraph(blockOrText, offset = 0) {
+    let text = '';
+    let runs = null;
+    if (blockOrText && typeof blockOrText === 'object') {
+      runs = blockOrText.runs;
+      text = blockOrText.text || htmlToText(blockOrText.html) || '';
+    } else if (typeof blockOrText === 'string') {
+      text = blockOrText;
+    }
+
+    if (!text.trim() && (!runs || runs.length === 0)) {
+      return { kind: 'paragraph', lines: [], runLines: null, totalHeight: 0 };
+    }
     const maxW = this.contentWidth - offset;
+
+    if (runs && runs.length > 0) {
+      const runLines = wrapRuns(
+        runs,
+        maxW,
+        this.fontRegular,
+        this.fontBold,
+        this.fontItalic,
+        this.fontMono,
+        this.fontSize
+      );
+      const lineHeight = this.fontSize + 4.5;
+      const spaceAfter = 7;
+      const contentHeight = runLines.length * lineHeight;
+      const totalHeight = contentHeight + spaceAfter;
+      return {
+        kind: 'paragraph',
+        lines: [],
+        runLines,
+        lineHeight,
+        contentHeight,
+        spaceAfter,
+        totalHeight
+      };
+    }
+
     const lines = wrapText(text, maxW, this.fontRegular, this.fontSize);
     const lineHeight = this.fontSize + 4.5;
     const spaceAfter = 7;
     const contentHeight = lines.length * lineHeight;
     const totalHeight = contentHeight + spaceAfter;
-    return { kind: 'paragraph', lines, lineHeight, contentHeight, spaceAfter, totalHeight };
+    return {
+      kind: 'paragraph',
+      lines,
+      runLines: null,
+      lineHeight,
+      contentHeight,
+      spaceAfter,
+      totalHeight
+    };
   }
 
   measureCode(block) {
@@ -499,7 +765,15 @@ class PdfLayoutEngine {
     const spaceAfter = 10;
     const contentHeight = codeLines.length * lineHeight;
     const totalHeight = paddingTopBottom * 2 + contentHeight + spaceAfter;
-    return { kind: 'code', codeLines, lineHeight, paddingTopBottom, contentHeight, totalHeight, spaceAfter };
+    return {
+      kind: 'code',
+      codeLines,
+      lineHeight,
+      paddingTopBottom,
+      contentHeight,
+      totalHeight,
+      spaceAfter
+    };
   }
 
   measureList(block) {
@@ -514,7 +788,10 @@ class PdfLayoutEngine {
         const isOrd = item.ordered !== undefined ? item.ordered : block.ordered;
         const itemIdx = item.index !== undefined ? item.index : idx + 1;
         const bullet = isOrd ? `${itemIdx}. ` : '• ';
-        const bulletWidth = this.fontBold.widthOfTextAtSize(safeWinAnsiText(bullet, this.fontBold), this.fontSize);
+        const bulletWidth = this.fontBold.widthOfTextAtSize(
+          safeWinAnsiText(bullet, this.fontBold),
+          this.fontSize
+        );
         const text = item.text || htmlToText(item.html);
         const indentX = this.margin + 8 + depth * 16;
         const availW = this.contentWidth - (8 + depth * 16) - bulletWidth - 4;
@@ -522,7 +799,15 @@ class PdfLayoutEngine {
         const lineHeight = this.fontSize + 4;
         const itemH = lines.length * lineHeight + 3;
         totalHeight += itemH;
-        measuredItems.push({ bullet, bulletWidth, text, indentX, lines, lineHeight, itemHeight: itemH });
+        measuredItems.push({
+          bullet,
+          bulletWidth,
+          text,
+          indentX,
+          lines,
+          lineHeight,
+          itemHeight: itemH
+        });
       }
       totalHeight += 6;
     } else {
@@ -530,7 +815,15 @@ class PdfLayoutEngine {
       const lines = wrapText(raw, this.contentWidth, this.fontRegular, this.fontSize);
       const lineHeight = this.fontSize + 4;
       totalHeight = lines.length * lineHeight + 6;
-      measuredItems.push({ bullet: '', bulletWidth: 0, text: raw, indentX: this.margin, lines, lineHeight, itemHeight: totalHeight });
+      measuredItems.push({
+        bullet: '',
+        bulletWidth: 0,
+        text: raw,
+        indentX: this.margin,
+        lines,
+        lineHeight,
+        itemHeight: totalHeight
+      });
     }
     return { kind: 'list', items: measuredItems, totalHeight };
   }
@@ -602,8 +895,7 @@ class PdfLayoutEngine {
         contentH += m.totalHeight;
         measuredBlocks.push({ block: b, measured: m, height: m.totalHeight });
       } else {
-        const text = b.text || htmlToText(b.html);
-        const m = this.measureParagraph(text, 24);
+        const m = this.measureParagraph(b, 24);
         contentH += m.totalHeight;
         measuredBlocks.push({ block: b, measured: m, height: m.totalHeight });
       }
@@ -654,8 +946,7 @@ class PdfLayoutEngine {
         } else if (item.block.kind === 'heading') {
           await this.renderHeading(item.block, 12);
         } else {
-          const text = item.block.text || htmlToText(item.block.html);
-          await this.renderParagraphText(text, 12);
+          await this.renderParagraph(item.block, 12);
         }
       }
 
@@ -663,6 +954,7 @@ class PdfLayoutEngine {
     } else if (m.totalHeight <= pageContentH) {
       this.addPage();
       await this.renderUserCard(msg);
+      return;
     } else {
       // Long user prompt: header + plain render
       this.ensureSpace(35);
@@ -684,11 +976,11 @@ class PdfLayoutEngine {
         } else if (item.block.kind === 'heading') {
           await this.renderHeading(item.block);
         } else {
-          const text = item.block.text || htmlToText(item.block.html);
-          await this.renderParagraphText(text);
+          await this.renderParagraph(item.block);
         }
       }
       this.cursorY -= 14;
+      return;
     }
   }
 
@@ -761,9 +1053,27 @@ class PdfLayoutEngine {
     this.cursorY -= m.spaceAfter;
   }
 
-  async renderParagraphText(text, offset = 0) {
-    const m = this.measureParagraph(text, offset);
-    if (m.lines.length === 0) return;
+  async renderParagraph(blockOrText, offset = 0) {
+    const m = this.measureParagraph(blockOrText, offset);
+    if (!m || (m.lines.length === 0 && (!m.runLines || m.runLines.length === 0))) return;
+
+    if (m.runLines && m.runLines.length > 0) {
+      for (const line of m.runLines) {
+        if (!this.hasSpace(m.lineHeight + 5)) {
+          this.addPage();
+        }
+        await this.renderRunLine(
+          line,
+          this.margin + offset,
+          this.cursorY - this.fontSize,
+          this.textColor,
+          this.textColorHex
+        );
+        this.cursorY -= m.lineHeight;
+      }
+      this.cursorY -= m.spaceAfter;
+      return;
+    }
 
     if (this.hasSpace(m.totalHeight)) {
       for (const l of m.lines) {
@@ -802,6 +1112,10 @@ class PdfLayoutEngine {
       }
       this.cursorY -= m.spaceAfter;
     }
+  }
+
+  async renderParagraphText(text, offset = 0) {
+    return await this.renderParagraph({ text }, offset);
   }
 
   async renderCode(block) {
@@ -1014,7 +1328,7 @@ class PdfLayoutEngine {
     this.cursorY -= 10;
   }
 
-  async renderTableRow(row, colWidths) {
+  async renderTableRow(row, _colWidths) {
     if (row.isHeader) {
       this.currentPage.drawRectangle({
         x: this.margin,
@@ -1047,7 +1361,8 @@ class PdfLayoutEngine {
           row.cellFont,
           this.textColor,
           this.textColorHex,
-          row.isHeader
+          row.isHeader,
+          cell.width - 10
         );
         lineY -= row.cellFontSize + 3;
       }
@@ -1065,12 +1380,7 @@ class PdfLayoutEngine {
       if (convResult && convResult.bytes) {
         const mathImg = await this.pdfDoc.embedPng(convResult.bytes);
         const maxH = block.displayMode ? 100 : 35;
-        const fitted = fitDimensions(
-          convResult.width,
-          convResult.height,
-          this.contentWidth,
-          maxH
-        );
+        const fitted = fitDimensions(convResult.width, convResult.height, this.contentWidth, maxH);
 
         const neededHeight = fitted.height + 14;
         this.ensureSpace(neededHeight);
@@ -1120,12 +1430,7 @@ class PdfLayoutEngine {
         }
 
         if (embeddedImg) {
-          const fitted = fitDimensions(
-            convResult.width,
-            convResult.height,
-            this.contentWidth,
-            380
-          );
+          const fitted = fitDimensions(convResult.width, convResult.height, this.contentWidth, 380);
 
           this.ensureSpace(fitted.height + 15);
           this.currentPage.drawImage(embeddedImg, {
@@ -1172,7 +1477,7 @@ export async function exportConversation(originalConversation, options = {}) {
     pageFormat = 'a4',
     margin: marginOpt = 'normal',
     fontSize = 10,
-    includeToc = false,
+    includeToc: _includeToc = false,
     headerText = '',
     footerText = ''
   } = options;
@@ -1182,6 +1487,7 @@ export async function exportConversation(originalConversation, options = {}) {
   const pdfDoc = await PDFDocument.create();
   const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const fontItalic = await pdfDoc.embedFont(StandardFonts.HelveticaOblique);
   const fontMono = await pdfDoc.embedFont(StandardFonts.Courier);
 
   const resolvedTheme = theme === 'dark' ? 'dark' : 'light';
@@ -1222,8 +1528,9 @@ export async function exportConversation(originalConversation, options = {}) {
     borderColor,
     fontRegular,
     fontBold,
+    fontItalic,
     fontMono,
-    fontSize
+    fontSize: fontSize || 10.5
   });
 
   // Render Messages
@@ -1242,7 +1549,7 @@ export async function exportConversation(originalConversation, options = {}) {
         roleLabel,
         margin,
         layoutEngine.cursorY - 12,
-        fontSize + 2,
+        (fontSize || 10.5) + 2.5,
         fontBold,
         assistantRoleColor,
         '#059669',
@@ -1269,13 +1576,11 @@ export async function exportConversation(originalConversation, options = {}) {
           } else if (block.kind === 'image' && (block.src || block.dataUrl)) {
             await layoutEngine.renderImage(block);
           } else {
-            const raw = block.text || htmlToText(block.html);
-            await layoutEngine.renderParagraphText(raw);
+            await layoutEngine.renderParagraph(block);
           }
         }
       } else {
-        const raw = msg.text || '';
-        await layoutEngine.renderParagraphText(raw);
+        await layoutEngine.renderParagraph({ text: msg.text || '' });
       }
 
       layoutEngine.cursorY -= 16; // Gap between assistant and next message
@@ -1326,9 +1631,11 @@ export async function exportConversation(originalConversation, options = {}) {
       day: 'numeric',
       year: 'numeric'
     });
-    const footerStr = `Exported: ${footerDate} | Page ${i + 1} of ${totalPages}`;
-    const footerW = fontRegular.widthOfTextAtSize(footerStr, 8);
-    p.drawText(footerStr, {
+    const footerPrefix = footerText ? `${footerText} | ` : '';
+    const footerStr = `${footerPrefix}Exported: ${footerDate} | Page ${i + 1} of ${totalPages}`;
+    const safeFooter = safeWinAnsiText(footerStr, fontRegular);
+    const footerW = fontRegular.widthOfTextAtSize(safeFooter, 8);
+    p.drawText(safeFooter, {
       x: (pageWidth - footerW) / 2, // Centered
       y: margin,
       size: 8,

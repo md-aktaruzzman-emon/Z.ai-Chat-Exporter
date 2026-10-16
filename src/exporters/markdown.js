@@ -121,7 +121,20 @@ export async function exportConversation(originalConversation, options = {}) {
             lines.push(`$${block.tex}$`);
           }
         } else if (block.kind === 'table') {
-          lines.push(turndown.turndown(block.html) + '\n');
+          if (block.html) {
+            lines.push(turndown.turndown(block.html) + '\n');
+          } else if (Array.isArray(block.rows) && block.rows.length > 0) {
+            const tableLines = [];
+            block.rows.forEach((row, rIdx) => {
+              const rowStr =
+                '| ' + row.map((c) => (c.text || '').replace(/\|/g, '\\|')).join(' | ') + ' |';
+              tableLines.push(rowStr);
+              if (rIdx === 0) {
+                tableLines.push('| ' + row.map(() => '---').join(' | ') + ' |');
+              }
+            });
+            lines.push(tableLines.join('\n') + '\n');
+          }
         } else if (block.kind === 'image') {
           lines.push(`![${block.alt || 'Image'}](${block.dataUrl || block.src})\n`);
         } else if (block.kind === 'citation') {
@@ -129,16 +142,18 @@ export async function exportConversation(originalConversation, options = {}) {
             `> 🔗 **Citation:** [${block.title}](${block.url}) ${block.snippet ? `— *${block.snippet}*` : ''}\n`
           );
         } else if (block.kind === 'artifact') {
-          lines.push(`#### Artifact: ${block.title}\n${turndown.turndown(block.html)}\n`);
+          lines.push(
+            `#### Artifact: ${block.title}\n${turndown.turndown(block.html || block.text || '')}\n`
+          );
         } else if (block.kind === 'paragraph') {
-          lines.push(turndown.turndown(block.html) + '\n');
+          lines.push(turndown.turndown(block.html || block.text || '') + '\n');
         } else if (block.kind === 'heading') {
           const prefix = '#'.repeat(Math.min(6, (block.level || 3) + 2));
           lines.push(`${prefix} ${block.text}\n`);
         }
       }
     } else {
-      lines.push(turndown.turndown(msg.html || msg.text) + '\n');
+      lines.push(turndown.turndown(msg.html || msg.text || '') + '\n');
     }
 
     lines.push('\n---\n');

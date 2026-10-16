@@ -11,8 +11,7 @@ import {
   parseMarkdownToBlocks,
   extractConversationId,
   fetchConversationFromApi,
-  classifyRole,
-  logMessageStructure
+  FullConversationCollector
 } from '../src/content/scraper.js';
 import * as vectorPdfExporter from '../src/exporters/pdf-vector.js';
 import * as docxExporter from '../src/exporters/docx.js';
@@ -194,7 +193,8 @@ Final paragraph.
         {
           id: 'msg-2',
           role: 'assistant',
-          content: '## Overview\n\nVector layout computes block heights strictly.\n\n```python\nprint("zero overlap")\n```'
+          content:
+            '## Overview\n\nVector layout computes block heights strictly.\n\n```python\nprint("zero overlap")\n```'
         }
       ]
     };
@@ -255,8 +255,14 @@ Final paragraph.
             {
               kind: 'table',
               rows: [
-                [{ text: 'Header A', isHeader: true }, { text: 'Header B', isHeader: true }],
-                [{ text: 'Data 1', isHeader: false }, { text: 'Data 2', isHeader: false }]
+                [
+                  { text: 'Header A', isHeader: true },
+                  { text: 'Header B', isHeader: true }
+                ],
+                [
+                  { text: 'Data 1', isHeader: false },
+                  { text: 'Data 2', isHeader: false }
+                ]
               ]
             }
           ]
@@ -271,5 +277,77 @@ Final paragraph.
     const docxRes = await docxExporter.exportConversation(conv);
     expect(docxRes.blob.size).toBeGreaterThan(3000);
     expect(docxRes.filename.endsWith('.docx')).toBe(true);
+  });
+
+  it('correctly parses div-based custom table and heading grids with runs', () => {
+    const container = document.createElement('div');
+    container.innerHTML = `
+      <div role="heading" aria-level="2">Dynamic Architecture Matrix</div>
+      <div role="table" class="data-grid">
+        <div role="row" class="grid-header">
+          <div role="columnheader">Component</div>
+          <div role="columnheader">Status</div>
+        </div>
+        <div role="row" class="grid-row">
+          <div role="gridcell">Vector Engine</div>
+          <div role="gridcell"><strong>Active</strong></div>
+        </div>
+        <div role="row" class="grid-row">
+          <div role="gridcell">DOM Scraper</div>
+          <div role="gridcell"><code>Verified</code></div>
+        </div>
+      </div>
+      <p>Performance summary with <strong>high</strong> <em>reliability</em> and <code>zero</code> data loss.</p>
+    `;
+
+    const blocks = parseBlocks(container);
+    expect(blocks.length).toBe(3);
+
+    // 1. Heading
+    expect(blocks[0].kind).toBe('heading');
+    expect(blocks[0].level).toBe(2);
+    expect(blocks[0].text).toBe('Dynamic Architecture Matrix');
+
+    // 2. Table
+    expect(blocks[1].kind).toBe('table');
+    expect(blocks[1].rows.length).toBe(3);
+    expect(blocks[1].rows[0][0].text).toBe('Component');
+    expect(blocks[1].rows[0][0].isHeader).toBe(true);
+    expect(blocks[1].rows[1][0].text).toBe('Vector Engine');
+    expect(blocks[1].rows[1][1].text).toBe('Active');
+    expect(blocks[1].rows[1][1].runs.some((r) => r.bold)).toBe(true);
+    expect(blocks[1].rows[2][1].runs.some((r) => r.code)).toBe(true);
+
+    // 3. Paragraph with runs
+    expect(blocks[2].kind).toBe('paragraph');
+    expect(blocks[2].runs).toBeDefined();
+    expect(blocks[2].runs.some((r) => r.bold && r.text.includes('high'))).toBe(true);
+    expect(blocks[2].runs.some((r) => r.italic && r.text.includes('reliability'))).toBe(true);
+    expect(blocks[2].runs.some((r) => r.code && r.text.includes('zero'))).toBe(true);
+  });
+
+  it('distinguishes repeated identical user prompts in FullConversationCollector', () => {
+    const collector = new FullConversationCollector();
+
+    const bubble1 = document.createElement('div');
+    bubble1.className = 'chat-user-message';
+    bubble1.textContent = 'Continue';
+
+    const bubble2 = document.createElement('div');
+    bubble2.className = 'chat-assistant-message';
+    bubble2.textContent = 'Here is the first installment of the explanation...';
+
+    const bubble3 = document.createElement('div');
+    bubble3.className = 'chat-user-message';
+    bubble3.textContent = 'Continue';
+
+    const id1 = collector.getMessageIdentity(bubble1, 'user', '');
+    const id2 = collector.getMessageIdentity(bubble2, 'assistant', id1);
+    const id3 = collector.getMessageIdentity(bubble3, 'user', id2);
+
+    // Both user turns have identical text 'Continue', but turn 3 follows turn 2 (assistant)
+    expect(id1).not.toBe(id3);
+    expect(id1).toContain('user:8:Continue:Continue');
+    expect(id3).toContain('__after_');
   });
 });

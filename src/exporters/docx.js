@@ -24,12 +24,55 @@ import { renderMathToDocxMath } from '../core/math-renderer.js';
 import { normalizeTableRows } from '../core/table-layout.js';
 
 /**
- * Parses an HTML string into structured TextRun objects with bold, italics, code, and links preserved.
- * @param {string} htmlOrText
+ * Converts structured InlineRun objects directly into docx TextRun elements.
+ * @param {import('../core/conversation-model.js').InlineRun[]} runs
  * @returns {TextRun[]}
  */
-function parseHtmlToTextRuns(htmlOrText) {
-  if (!htmlOrText) return [new TextRun('')];
+function parseRunsToTextRuns(runs) {
+  if (!Array.isArray(runs) || runs.length === 0) return [new TextRun('')];
+  const textRuns = [];
+  for (const run of runs) {
+    const raw = run.text || '';
+    const lines = raw.split('\n');
+    lines.forEach((line, idx) => {
+      if (idx > 0) {
+        textRuns.push(new TextRun({ text: '', break: 1 }));
+      }
+      if (line.length > 0) {
+        textRuns.push(
+          new TextRun({
+            text: line,
+            bold: run.bold,
+            italics: run.italic,
+            font: run.code ? 'Consolas' : undefined,
+            color: run.link ? '2563EB' : undefined,
+            size: run.code ? 19 : 22
+          })
+        );
+      }
+    });
+  }
+  return textRuns.length > 0 ? textRuns : [new TextRun('')];
+}
+
+/**
+ * Parses an HTML string, block, or runs into structured TextRun objects with bold, italics, code, and links preserved.
+ * @param {string|object|Array} htmlOrTextOrBlock
+ * @returns {TextRun[]}
+ */
+function parseHtmlToTextRuns(htmlOrTextOrBlock) {
+  if (!htmlOrTextOrBlock) return [new TextRun('')];
+  if (Array.isArray(htmlOrTextOrBlock)) {
+    return parseRunsToTextRuns(htmlOrTextOrBlock);
+  }
+  if (typeof htmlOrTextOrBlock === 'object') {
+    if (Array.isArray(htmlOrTextOrBlock.runs) && htmlOrTextOrBlock.runs.length > 0) {
+      return parseRunsToTextRuns(htmlOrTextOrBlock.runs);
+    }
+    return parseHtmlToTextRuns(htmlOrTextOrBlock.html || htmlOrTextOrBlock.text);
+  }
+
+  const htmlOrText = String(htmlOrTextOrBlock);
 
   if (typeof DOMParser !== 'undefined') {
     try {
@@ -269,6 +312,7 @@ async function createBlocksDocx(msg, modelName) {
             },
             rows: [
               new TableRow({
+                cantSplit: false,
                 children: [
                   new TableCell({
                     shading: { fill: 'F8FAFC' },
