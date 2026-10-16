@@ -19,7 +19,7 @@ export async function exportConversation(originalConversation, options = {}) {
 
   // Pretty printed with stable 2-space indentation
   const jsonContent = JSON.stringify(conv, null, 2);
-  const mime = 'application/json;charset=utf-8';
+  const mime = 'application/json';
   const blob = new Blob([jsonContent], { type: mime });
 
   const filename = generateFilename({

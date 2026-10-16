@@ -134,7 +134,7 @@ export async function exportConversation(originalConversation, options = {}) {
 
   // Prepend UTF-8 BOM so Excel opens UTF-8 text correctly
   const csvContent = '\uFEFF' + rows.join('\r\n');
-  const mime = 'text/csv;charset=utf-8';
+  const mime = 'text/csv';
   const blob = new Blob([csvContent], { type: mime });
 
   const filename = generateFilename({

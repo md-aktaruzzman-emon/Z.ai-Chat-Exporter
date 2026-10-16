@@ -8,6 +8,7 @@ import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
 import { generateFilename } from '../core/utils/filename.js';
 import { anonymizeConversation } from './pii.js';
+import { normalizeTableRows } from '../core/table-layout.js';
 
 /**
  * Initializes and configures the Turndown conversion engine.
@@ -23,6 +24,9 @@ function createTurndownService(_preset) {
   });
 
   service.use(gfm);
+
+  // Preserve pre-existing markdown bold/italics without escaping asterisks into \*\*
+  service.escape = (string) => string;
 
   // Preserve KaTeX math formulas as LaTeX syntax
   service.addRule('katex', {
@@ -160,19 +164,47 @@ export async function exportConversation(originalConversation, options = {}) {
             `📎 **Attachment:** \`${block.name || 'File'}\`${block.size ? ` (${block.size})` : ''}\n`
           );
         } else if (block.kind === 'table') {
-          if (block.html) {
-            lines.push(turndown.turndown(block.html) + '\n');
-          } else if (Array.isArray(block.rows) && block.rows.length > 0) {
+          const tableRows = normalizeTableRows(block);
+          if (tableRows.length > 0) {
+            const maxCols = Math.max(...tableRows.map((r) => r.length));
             const tableLines = [];
-            block.rows.forEach((row, rIdx) => {
-              const rowStr =
-                '| ' + row.map((c) => (c.text || '').replace(/\|/g, '\\|')).join(' | ') + ' |';
-              tableLines.push(rowStr);
+            tableRows.forEach((row, rIdx) => {
+              const cells = row.map((c) =>
+                (c.text || '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim()
+              );
+              while (cells.length < maxCols) cells.push('');
+              tableLines.push(`| ${cells.join(' | ')} |`);
               if (rIdx === 0) {
-                tableLines.push('| ' + row.map(() => '---').join(' | ') + ' |');
+                const headerSep = Array(maxCols).fill('---').join(' | ');
+                tableLines.push(`| ${headerSep} |`);
               }
             });
             lines.push(tableLines.join('\n') + '\n');
+          } else if (block.html) {
+            lines.push(turndown.turndown(block.html) + '\n');
+          }
+        } else if (block.kind === 'quote') {
+          const rawQuote = block.text || (block.html ? turndown.turndown(block.html) : '');
+          const quoteLines = rawQuote
+            .split('\n')
+            .map((l) => `> ${l}`)
+            .join('\n');
+          lines.push(`${quoteLines}\n`);
+        } else if (block.kind === 'toolCall') {
+          lines.push(`🔧 **Tool: \`${block.name || 'Function'}\`**\n`);
+          if (block.args) {
+            lines.push(`\`\`\`json\n${block.args}\n\`\`\`\n`);
+          }
+          if (block.result) {
+            lines.push(`> **Result:**\n\`\`\`\n${block.result}\n\`\`\`\n`);
+          }
+        } else if (block.kind === 'searchResult') {
+          lines.push(`🔍 **Search:** *${block.query || ''}*\n`);
+          if (Array.isArray(block.results)) {
+            block.results.forEach((res) => {
+              lines.push(`- [${res.title || res.url}](${res.url})`);
+            });
+            lines.push('');
           }
         } else if (block.kind === 'image') {
           lines.push(`![${block.alt || 'Image'}](${block.dataUrl || block.src})\n`);
@@ -185,7 +217,23 @@ export async function exportConversation(originalConversation, options = {}) {
             `#### Artifact: ${block.title}\n${turndown.turndown(block.html || block.text || '')}\n`
           );
         } else if (block.kind === 'paragraph') {
-          lines.push(turndown.turndown(block.html || block.text || '') + '\n');
+          if (block.html) {
+            lines.push(turndown.turndown(block.html) + '\n');
+          } else if (Array.isArray(block.runs) && block.runs.length > 0) {
+            const runMd = block.runs
+              .map((r) => {
+                let t = r.text || '';
+                if (r.code) t = `\`${t}\``;
+                if (r.bold) t = `**${t}**`;
+                if (r.italic) t = `*${t}*`;
+                if (r.link) t = `[${t}](${r.link})`;
+                return t;
+              })
+              .join('');
+            lines.push(runMd + '\n');
+          } else if (block.text) {
+            lines.push(block.text + '\n');
+          }
         } else if (block.kind === 'heading') {
           const prefix = '#'.repeat(Math.min(6, (block.level || 3) + 2));
           lines.push(`${prefix} ${block.text}\n`);
@@ -207,7 +255,7 @@ export async function exportConversation(originalConversation, options = {}) {
     timestamp: conv.createdAt
   });
 
-  const mime = 'text/markdown;charset=utf-8';
+  const mime = 'text/markdown';
   const blob = new Blob([content], { type: mime });
 
   return {

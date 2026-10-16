@@ -257,31 +257,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             throw new Error(renderResponse?.error?.message || 'Offscreen rendering failed');
           }
 
-          const { dataUrl, filename, mime } = renderResponse.data;
+          const { dataUrl, blobUrl, filename, mime } = renderResponse.data;
 
           let downloadId = null;
-          try {
-            // Trigger download from service worker — no saveAs dialog so it goes straight to Downloads
-            downloadId = await new Promise((resolve, reject) => {
-              chrome.downloads.download(
-                {
-                  url: dataUrl,
-                  filename: filename || `conversation.${format}`
-                },
-                (id) => {
-                  if (chrome.runtime.lastError) {
-                    reject(new Error(chrome.runtime.lastError.message));
-                  } else {
-                    resolve(id);
+          const downloadUrl = blobUrl || dataUrl;
+          if (downloadUrl) {
+            try {
+              // Trigger download from service worker — no saveAs dialog so it goes straight to Downloads
+              downloadId = await new Promise((resolve, reject) => {
+                chrome.downloads.download(
+                  {
+                    url: downloadUrl,
+                    filename: filename || `conversation.${format}`
+                  },
+                  (id) => {
+                    if (chrome.runtime.lastError) {
+                      reject(new Error(chrome.runtime.lastError.message));
+                    } else {
+                      resolve(id);
+                    }
                   }
-                }
+                );
+              });
+            } catch (downloadErr) {
+              console.warn(
+                '[ServiceWorker] chrome.downloads.download threw, delegating to content script DOM download:',
+                downloadErr
               );
-            });
-          } catch (downloadErr) {
-            console.warn(
-              '[ServiceWorker] chrome.downloads.download threw, delegating to content script DOM download:',
-              downloadErr
-            );
+            }
           }
 
           setActionBadge('success');
@@ -292,7 +295,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               downloadId,
               filename,
               mime,
-              dataUrl
+              dataUrl,
+              blobUrl
             }
           };
         }

@@ -14,6 +14,8 @@ import * as vectorPdfExporter from '../src/exporters/pdf-vector.js';
 import * as docxExporter from '../src/exporters/docx.js';
 import * as htmlExporter from '../src/exporters/html.js';
 import * as markdownExporter from '../src/exporters/markdown.js';
+import * as jsonExporter from '../src/exporters/json.js';
+import { EXPORTERS } from '../src/exporters/index.js';
 import { FullConversationCollector } from '../src/content/scraper.js';
 import {
   renderMathToHtml,
@@ -621,5 +623,142 @@ describe('7. Full Conversation Collection & Virtualization Sentinel Tests', () =
     expect(docXml).toContain('SENTINEL_FIRST_MESSAGE');
     expect(docXml).toContain('SENTINEL_MIDDLE_MESSAGE');
     expect(docXml).toContain('SENTINEL_LAST_MESSAGE');
+  });
+});
+
+describe('8. Word DOCX, Markdown, and Raw Data (JSON) Fidelity Suite', () => {
+  const mockConv = {
+    schemaVersion: 2,
+    id: 'test_corruption_and_fidelity',
+    title: 'Special Characters: \u0000\u0007\u0008 Bengali তুমি কেমন আছো?',
+    url: 'https://chat.z.ai/test/fidelity',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    model: 'Z.ai-Pro-4.5',
+    theme: 'light',
+    stats: { words: 30, chars: 180, tokensEst: 45, codeBlocks: 1, images: 0, tables: 1 },
+    messages: [
+      {
+        index: 0,
+        role: 'user',
+        text: 'What are the specs? \u0000\u001f **Important Note**',
+        blocks: [
+          {
+            kind: 'paragraph',
+            text: 'What are the specs? \u0000\u001f **Important Note**',
+            runs: [{ text: 'What are the specs? ' }, { text: 'Important Note', bold: true }]
+          }
+        ]
+      },
+      {
+        index: 1,
+        role: 'assistant',
+        text: 'Here is the response with quote and tools:',
+        blocks: [
+          {
+            kind: 'quote',
+            text: 'High performance is non-negotiable.'
+          },
+          {
+            kind: 'code',
+            language: 'python',
+            code: 'def compute():\n\t# \u0000 illegal char in comment\n\treturn 42'
+          },
+          {
+            kind: 'table',
+            rows: [
+              [
+                { text: 'Feature', isHeader: true },
+                { text: 'Value', isHeader: true }
+              ],
+              [{ text: 'Latency', colspan: 1, rowspan: 2 }, { text: '12ms' }],
+              [{ text: 'Throughput' }, { text: '100k' }]
+            ]
+          },
+          {
+            kind: 'toolCall',
+            name: 'fetchMetrics',
+            args: '{"target": "cluster-1"}',
+            result: '{"status": "ok", "latency": 12}'
+          },
+          {
+            kind: 'searchResult',
+            query: 'distributed systems raft',
+            results: [{ title: 'Raft Paper', url: 'https://raft.github.io' }]
+          }
+        ]
+      }
+    ]
+  };
+
+  it('Word DOCX: completely sanitizes XML 1.0 illegal characters to prevent corruption', async () => {
+    const res = await docxExporter.exportConversation(mockConv);
+    expect(res.blob).toBeDefined();
+    expect(res.blob.size).toBeGreaterThan(3000);
+    expect(res.filename.endsWith('.docx')).toBe(true);
+
+    const zip = await JSZip.loadAsync(await blobToArrayBuffer(res.blob));
+    const docXml = await zip.file('word/document.xml').async('string');
+
+    // Negative check: XML 1.0 illegal control characters MUST NOT be present
+    const hasIllegalChars = /[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]/.test(docXml);
+    expect(hasIllegalChars).toBe(false);
+
+    // Positive check: Bengali, quote, code, table, and toolCall are preserved
+    expect(docXml).toContain('তুমি কেমন আছো?');
+    expect(docXml).toContain('High performance is non-negotiable.');
+    expect(docXml).toContain('def compute():');
+    expect(docXml).toContain('fetchMetrics');
+    expect(docXml).toContain('distributed systems raft');
+  });
+
+  it('Markdown: does NOT escape bold asterisks into \\*\\* and preserves quotes and tables', async () => {
+    const res = await markdownExporter.exportConversation(mockConv);
+    expect(res.blob).toBeDefined();
+    expect(res.mime).toBe('text/markdown');
+
+    const text = res.previewText;
+
+    // Must NOT contain ugly double-escaped asterisks \*\*
+    expect(text).not.toContain('\\*\\*Important Note\\*\\*');
+    expect(text).toContain('**Important Note**');
+
+    // Quote block must be rendered with >
+    expect(text).toContain('> High performance is non-negotiable.');
+
+    // Table must be formatted as GFM pipe table
+    expect(text).toContain('| Feature | Value |');
+    expect(text).toContain('| --- | --- |');
+    expect(text).toContain('| Latency | 12ms |');
+
+    // Tool call and search result must be formatted cleanly
+    expect(text).toContain('🔧 **Tool: `fetchMetrics`**');
+    expect(text).toContain('🔍 **Search:** *distributed systems raft*');
+  });
+
+  it('Raw Data (JSON): exports valid Conversation v2 schema with standard application/json MIME', async () => {
+    const res = await jsonExporter.exportConversation(mockConv);
+    expect(res.blob).toBeDefined();
+    expect(res.mime).toBe('application/json');
+    expect(res.filename.endsWith('.json')).toBe(true);
+
+    const parsed = JSON.parse(res.previewText);
+    expect(parsed.schemaVersion).toBe(2);
+    expect(parsed.model).toBe('Z.ai-Pro-4.5');
+    expect(parsed.messages.length).toBe(2);
+    expect(parsed.title).toContain('Bengali তুমি কেমন আছো?');
+  });
+
+  it('Registry: all exporters define standard, clean MIME types without invalid parameters', () => {
+    expect(EXPORTERS.docx.mime).toBe(
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    );
+    expect(EXPORTERS.md.mime).toBe('text/markdown');
+    expect(EXPORTERS.json.mime).toBe('application/json');
+    expect(EXPORTERS.html.mime).toBe('text/html');
+    expect(EXPORTERS.txt.mime).toBe('text/plain');
+    expect(EXPORTERS.csv.mime).toBe('text/csv');
+    expect(EXPORTERS.pdf.mime).toBe('application/pdf');
+    expect(EXPORTERS.png.mime).toBe('image/png');
   });
 });

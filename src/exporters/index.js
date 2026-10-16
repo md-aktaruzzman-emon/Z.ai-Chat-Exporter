@@ -27,7 +27,7 @@ export const EXPORTERS = {
   md: {
     label: 'Markdown',
     extension: 'md',
-    mime: 'text/markdown;charset=utf-8',
+    mime: 'text/markdown',
     presets: ['github', 'obsidian', 'notion'],
     defaultPreset: 'github',
     loader: async () => await import('./markdown.js')
@@ -35,19 +35,19 @@ export const EXPORTERS = {
   html: {
     label: 'Standalone HTML',
     extension: 'html',
-    mime: 'text/html;charset=utf-8',
+    mime: 'text/html',
     loader: async () => await import('./html.js')
   },
   txt: {
     label: 'Plain Text',
     extension: 'txt',
-    mime: 'text/plain;charset=utf-8',
+    mime: 'text/plain',
     loader: async () => await import('./txt.js')
   },
   json: {
     label: 'JSON Data',
     extension: 'json',
-    mime: 'application/json;charset=utf-8',
+    mime: 'application/json',
     loader: async () => await import('./json.js')
   },
   png: {
@@ -59,7 +59,7 @@ export const EXPORTERS = {
   csv: {
     label: 'CSV Spreadsheet',
     extension: 'csv',
-    mime: 'text/csv;charset=utf-8',
+    mime: 'text/csv',
     loader: async () => await import('./csv.js')
   }
 };

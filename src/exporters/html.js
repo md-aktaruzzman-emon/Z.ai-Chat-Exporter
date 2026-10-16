@@ -210,7 +210,7 @@ export async function exportConversation(originalConversation, options = {}) {
 
   const resolvedTheme = theme === 'auto' || !theme ? conv.theme || 'light' : theme;
   const htmlContent = buildStandaloneHtml(conv, resolvedTheme);
-  const mime = 'text/html;charset=utf-8';
+  const mime = 'text/html';
   const blob = new Blob([htmlContent], { type: mime });
 
   const filename = generateFilename({

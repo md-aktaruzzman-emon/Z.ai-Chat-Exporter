@@ -128,7 +128,7 @@ export async function exportConversation(originalConversation, options = {}) {
   }
 
   const content = lines.join('\n');
-  const mime = 'text/plain;charset=utf-8';
+  const mime = 'text/plain';
   const blob = new Blob([content], { type: mime });
 
   const filename = generateFilename({

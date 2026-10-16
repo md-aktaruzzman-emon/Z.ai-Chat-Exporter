@@ -25,6 +25,18 @@ import { normalizeTableRows, computeColumnWidths } from '../core/table-layout.js
 import { parseHtmlToInlineRuns } from '../core/conversation-model.js';
 
 /**
+ * Strips XML 1.0 illegal control characters that corrupt Word documents.
+ * XML 1.0 allows: \x09 (tab), \x0A (LF), \x0D (CR), and \x20-\uD7FF, \uE000-\uFFFD, \u10000-\u10FFFF.
+ * Illegal: \x00-\x08, \x0B-\x0C, \x0E-\x1F, \uFFFE, \uFFFF.
+ * @param {string} text
+ * @returns {string}
+ */
+export function sanitizeXmlText(text) {
+  if (typeof text !== 'string') return '';
+  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]/g, '');
+}
+
+/**
  * Converts structured InlineRun objects directly into docx TextRun elements.
  * @param {import('../core/conversation-model.js').InlineRun[]} runs
  * @returns {TextRun[]}
@@ -33,7 +45,7 @@ function parseRunsToTextRuns(runs) {
   if (!Array.isArray(runs) || runs.length === 0) return [new TextRun('')];
   const textRuns = [];
   for (const run of runs) {
-    const raw = run.text || '';
+    const raw = sanitizeXmlText(run.text || '');
     const lines = raw.split('\n');
     lines.forEach((line, idx) => {
       if (idx > 0) {
@@ -94,7 +106,7 @@ async function createBlocksDocx(msg, modelName) {
       spacing: { before: 480, after: 200 },
       children: [
         new TextRun({
-          text: isUser ? '👤 You' : `🤖 ${roleName}`,
+          text: isUser ? '👤 You' : `🤖 ${sanitizeXmlText(roleName)}`,
           bold: true,
           color: isUser ? '059669' : '2563EB',
           size: 26
@@ -131,7 +143,10 @@ async function createBlocksDocx(msg, modelName) {
                         spacing: { before: 0, after: 40 },
                         children: [
                           new TextRun({
-                            text: (block.icon || '📄') + '  ' + (block.name || 'Attachment'),
+                            text:
+                              (block.icon || '📄') +
+                              '  ' +
+                              sanitizeXmlText(block.name || 'Attachment'),
                             bold: true,
                             size: 21,
                             color: '0F172A'
@@ -142,7 +157,9 @@ async function createBlocksDocx(msg, modelName) {
                         spacing: { before: 0, after: 0 },
                         children: [
                           new TextRun({
-                            text: `${block.ext || 'FILE'}${block.size ? '  •  ' + block.size : ''}`,
+                            text: sanitizeXmlText(
+                              `${block.ext || 'FILE'}${block.size ? '  •  ' + block.size : ''}`
+                            ),
                             size: 18,
                             color: '64748B'
                           })
@@ -227,7 +244,7 @@ async function createBlocksDocx(msg, modelName) {
             spacing: { before: 180, after: 180 },
             children: [
               new TextRun({
-                text: block.text || block.html?.replace(/<[^>]*>/g, '') || '',
+                text: sanitizeXmlText(block.text || block.html?.replace(/<[^>]*>/g, '') || ''),
                 italics: true,
                 color: '4B5563',
                 size: 21
@@ -237,7 +254,7 @@ async function createBlocksDocx(msg, modelName) {
         );
       } else if (block.kind === 'code') {
         // PRESERVE EXACT INDENTATION & TABS (replace \t with 4 spaces for Word)
-        const rawCode = (block.code || '').replace(/\t/g, '    ');
+        const rawCode = sanitizeXmlText((block.code || '').replace(/\t/g, '    '));
         const lines = rawCode.split('\n');
         const codeRuns = lines.map(
           (line, idx) =>
@@ -302,7 +319,7 @@ async function createBlocksDocx(msg, modelName) {
               spacing: { before: 180, after: 180 },
               children: [
                 new TextRun({
-                  text: block.tex || '',
+                  text: sanitizeXmlText(block.tex || ''),
                   italics: true,
                   color: '4F46E5',
                   size: 22
@@ -318,7 +335,7 @@ async function createBlocksDocx(msg, modelName) {
             spacing: { before: 120, after: 120 },
             children: [
               new TextRun({
-                text: `Thinking Process: ${block.text}`,
+                text: sanitizeXmlText(`Thinking Process: ${block.text || ''}`),
                 italics: true,
                 color: '64748B',
                 size: 20
@@ -332,9 +349,58 @@ async function createBlocksDocx(msg, modelName) {
             spacing: { before: 120, after: 120 },
             children: [
               new TextRun({
-                text: `Source: ${block.title} (${block.url})`,
+                text: sanitizeXmlText(`Source: ${block.title || ''} (${block.url || ''})`),
                 color: '2563EB',
                 size: 20
+              })
+            ]
+          })
+        );
+      } else if (block.kind === 'toolCall') {
+        const toolChildren = [
+          new TextRun({
+            text: sanitizeXmlText(`🔧 Tool: ${block.name || 'Function'}`),
+            bold: true,
+            size: 20,
+            color: '6B7280'
+          })
+        ];
+        if (block.args) {
+          toolChildren.push(
+            new TextRun({
+              text: sanitizeXmlText(`\nArguments: ${block.args}`),
+              font: 'Consolas',
+              size: 18,
+              color: '4B5563'
+            })
+          );
+        }
+        if (block.result) {
+          toolChildren.push(
+            new TextRun({
+              text: sanitizeXmlText(`\nResult: ${block.result}`),
+              font: 'Consolas',
+              size: 18,
+              color: '4B5563'
+            })
+          );
+        }
+        items.push(
+          new Paragraph({
+            spacing: { before: 100, after: 100 },
+            children: toolChildren
+          })
+        );
+      } else if (block.kind === 'searchResult') {
+        items.push(
+          new Paragraph({
+            spacing: { before: 100, after: 100 },
+            children: [
+              new TextRun({
+                text: sanitizeXmlText(`🔍 Search Query: ${block.query || ''}`),
+                bold: true,
+                size: 20,
+                color: '2563EB'
               })
             ]
           })
@@ -365,7 +431,6 @@ async function createBlocksDocx(msg, modelName) {
                       : undefined,
                   margins: { top: 140, bottom: 140, left: 180, right: 180 },
                   columnSpan: c.colspan > 1 ? c.colspan : undefined,
-                  rowSpan: c.rowspan > 1 ? c.rowspan : undefined,
                   children: [
                     new Paragraph({
                       spacing: { before: 0, after: 0 },
@@ -489,13 +554,17 @@ export async function exportConversation(originalConversation, options = {}) {
     new Paragraph({
       heading: HeadingLevel.TITLE,
       spacing: { before: 100, after: 100 },
-      children: [new TextRun({ text: conv.title, bold: true, size: 36, color: '0F172A' })]
+      children: [
+        new TextRun({ text: sanitizeXmlText(conv.title), bold: true, size: 36, color: '0F172A' })
+      ]
     }),
     new Paragraph({
       spacing: { after: 300 },
       children: [
         new TextRun({
-          text: `Model: ${conv.model}  |  Exported: ${new Date(conv.createdAt).toLocaleString()}`,
+          text: sanitizeXmlText(
+            `Model: ${conv.model}  |  Exported: ${new Date(conv.createdAt).toLocaleString()}`
+          ),
           color: '64748B',
           size: 19
         })

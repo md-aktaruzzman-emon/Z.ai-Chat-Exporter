@@ -158,15 +158,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
           }
 
-          // Convert Blob to Data URL for message passing to service-worker/downloads
+          // Convert Blob to Data URL and extension-origin Blob URL for reliable downloads
           let dataUrl = renderResult.dataUrl;
-          if (!dataUrl && renderResult.blob instanceof Blob) {
-            const reader = new FileReader();
-            dataUrl = await new Promise((res, rej) => {
-              reader.onloadend = () => res(reader.result);
-              reader.onerror = rej;
-              reader.readAsDataURL(renderResult.blob);
-            });
+          let blobUrl = null;
+          if (renderResult.blob instanceof Blob) {
+            blobUrl = URL.createObjectURL(renderResult.blob);
+            if (!dataUrl) {
+              const reader = new FileReader();
+              dataUrl = await new Promise((res, rej) => {
+                reader.onloadend = () => res(reader.result);
+                reader.onerror = rej;
+                reader.readAsDataURL(renderResult.blob);
+              });
+            }
           }
 
           return {
@@ -174,6 +178,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             data: {
               mime: renderResult.mime || exporterDef.mime,
               filename: renderResult.filename,
+              blobUrl,
               dataUrl,
               previewHtml: renderResult.previewHtml,
               previewText: renderResult.previewText

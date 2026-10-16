@@ -15,22 +15,47 @@ import { t } from '../core/utils/i18n.js';
 /**
  * DOM-anchor-based download safe for content script context.
  * Does NOT use chrome.downloads (unavailable in content scripts).
+ * Converts data URLs to Object URLs to prevent Chromium top-frame data URL navigation blocks.
  * @param {string} url - Object URL or data URL
  * @param {string} filename
  * @param {boolean} [shouldRevoke=false] - true if url is a blob: URL that needs revoking
  */
 function contentScriptDownload(url, filename, shouldRevoke = false) {
+  let downloadUrl = url;
+  let needRevoke = shouldRevoke;
+
+  if (typeof url === 'string' && url.startsWith('data:')) {
+    try {
+      const parts = url.split(',');
+      const meta = parts[0] || '';
+      const base64Data = parts[1] || '';
+      const mimeMatch = meta.match(/:(.*?)(?:;|$)/);
+      const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+      const binaryStr = globalThis.atob(base64Data);
+      const len = binaryStr.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: mime });
+      downloadUrl = URL.createObjectURL(blob);
+      needRevoke = true;
+    } catch (e) {
+      console.warn('[Z.ai Exporter] Failed to convert data URL to Blob for download:', e);
+    }
+  }
+
   const a = document.createElement('a');
-  a.href = url;
+  a.href = downloadUrl;
   a.download = filename || 'export';
   a.style.display = 'none';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  if (shouldRevoke) {
+  if (needRevoke) {
     setTimeout(() => {
       try {
-        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(downloadUrl);
       } catch {
         /* ignore */
       }
@@ -206,8 +231,11 @@ async function handleExport(options) {
     if (response && response.ok) {
       // Background offscreen succeeded — service worker already triggered chrome.downloads
       // If download didn't fire (no downloadId) fall back to DOM anchor
-      if (!response.data?.downloadId && response.data?.dataUrl) {
-        contentScriptDownload(response.data.dataUrl, response.data.filename);
+      if (!response.data?.downloadId && (response.data?.blobUrl || response.data?.dataUrl)) {
+        contentScriptDownload(
+          response.data.blobUrl || response.data.dataUrl,
+          response.data.filename
+        );
       }
 
       panelInstance.setStatus(t('statusComplete'));
