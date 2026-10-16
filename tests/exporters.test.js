@@ -740,3 +740,148 @@ describe('7. Exporters File Generation', () => {
     expect(imgBlock.alt).toBe('System Architecture Diagram');
   });
 });
+
+describe('8. Security, CSV Formula Injection & PII Runs Hardening', () => {
+  it('neutralizes CSV formula injection (CWE-1236) by prefixing trigger characters with a single quote', async () => {
+    const formulaConv = createEmptyConversation();
+    formulaConv.title = 'Formula Test';
+    formulaConv.messages = [
+      {
+        index: 0,
+        role: 'user',
+        text: "=cmd|'/C calc'!A0",
+        blocks: [{ kind: 'paragraph', text: "=cmd|'/C calc'!A0" }]
+      },
+      {
+        index: 1,
+        role: 'assistant',
+        text: '@SUM(A1:A10)',
+        blocks: [{ kind: 'paragraph', text: '@SUM(A1:A10)' }]
+      },
+      {
+        index: 2,
+        role: 'user',
+        text: '+123456789',
+        blocks: [{ kind: 'paragraph', text: '+123456789' }]
+      },
+      {
+        index: 3,
+        role: 'assistant',
+        text: '-dangerFormula()',
+        blocks: [{ kind: 'paragraph', text: '-dangerFormula()' }]
+      }
+    ];
+
+    const res = await csvExporter.exportConversation(formulaConv);
+    expect(res.previewText).toContain("\"'=cmd|'/C calc'!A0\"");
+    expect(res.previewText).toContain('"\'@SUM(A1:A10)"');
+    expect(res.previewText).toContain(`"'+123456789"`);
+    expect(res.previewText).toContain('"\'-dangerFormula()"');
+    // Ensure raw unescaped formula triggers at cell start are completely prevented
+    expect(res.previewText).not.toMatch(/,"=cmd/);
+    expect(res.previewText).not.toMatch(/,"@SUM/);
+  });
+
+  it('blocks data: URLs and control-character obfuscations on hyperlinks (isHref: true)', () => {
+    expect(
+      isSafeUrl('data:image/svg+xml;utf8,<svg><script>alert(1)</script></svg>', { isHref: true })
+    ).toBe(false);
+    expect(isSafeUrl('data:text/html,<script>alert(1)</script>', { isHref: true })).toBe(false);
+    expect(isSafeUrl('javascript:alert(1)', { isHref: true })).toBe(false);
+    expect(isSafeUrl('jav\x09ascript:alert(1)', { isHref: true })).toBe(false);
+    expect(isSafeUrl('vbscript:msgbox(1)', { isHref: true })).toBe(false);
+    expect(isSafeUrl('file:///etc/passwd', { isHref: true })).toBe(false);
+
+    // Hyperlinks allowing http/https/mailto/tel and relative
+    expect(isSafeUrl('https://chat.z.ai/thread/123', { isHref: true })).toBe(true);
+    expect(isSafeUrl('mailto:support@z.ai', { isHref: true })).toBe(true);
+    expect(isSafeUrl('#heading-1', { isHref: true })).toBe(true);
+
+    // Media src still allows non-executable media data URIs
+    expect(isSafeUrl('data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==', { isHref: false })).toBe(
+      true
+    );
+    expect(isSafeUrl('data:image/jpeg;base64,/9j/4AAQSkZJRg==', { isHref: false })).toBe(true);
+  });
+
+  it('anonymizes PII within structured inline runs without mutating original conversation', () => {
+    const convWithRuns = createEmptyConversation();
+    convWithRuns.title = 'Security Audit';
+    convWithRuns.messages = [
+      {
+        index: 0,
+        role: 'assistant',
+        text: 'Contact support',
+        blocks: [
+          {
+            kind: 'paragraph',
+            text: 'Reach me at dev@corp.com or key sk-1234567890abcdef1234567890',
+            runs: [
+              { text: 'Reach me at dev@corp.com ', bold: false },
+              { text: 'or key sk-1234567890abcdef1234567890', code: true }
+            ]
+          },
+          {
+            kind: 'list',
+            ordered: false,
+            items: [
+              {
+                text: 'Call +1 555-0199',
+                runs: [{ text: 'Call +1 555-0199' }]
+              }
+            ]
+          }
+        ]
+      }
+    ];
+
+    const anonymized = anonymizeConversation(convWithRuns);
+    const pBlock = anonymized.messages[0].blocks[0];
+    expect(pBlock.runs[0].text).toContain('[EMAIL REDACTED]');
+    expect(pBlock.runs[0].text).not.toContain('dev@corp.com');
+    expect(pBlock.runs[1].text).toContain('[API KEY REDACTED]');
+    expect(pBlock.runs[1].text).not.toContain('sk-1234567890abcdef1234567890');
+
+    const lBlock = anonymized.messages[0].blocks[1];
+    expect(lBlock.items[0].runs[0].text).toContain('[PHONE REDACTED]');
+
+    // Ensure original conversation is completely pristine (immutability)
+    expect(convWithRuns.messages[0].blocks[0].runs[0].text).toBe('Reach me at dev@corp.com ');
+  });
+
+  it('handles Windows reserved device names and strips trailing periods from filenames', () => {
+    const fnCon = generateFilename({ template: '{{title}}', title: 'CON', format: 'pdf' });
+    expect(fnCon).toBe('CON_export.pdf');
+
+    const fnPrn = generateFilename({ template: '{{title}}', title: 'PRN', format: 'docx' });
+    expect(fnPrn).toBe('PRN_export.docx');
+
+    const fnNul = generateFilename({ template: '{{title}}', title: 'nul', format: 'txt' });
+    expect(fnNul).toBe('nul_export.txt');
+
+    const fnDots = generateFilename({ title: 'Final Report...', format: 'html' });
+    expect(fnDots).not.toContain('...html');
+    expect(fnDots).toMatch(/^Final Report.*\.html$/);
+  });
+
+  it('sanitizes newlines in YAML frontmatter for Obsidian markdown exports', async () => {
+    const multiLineConv = createEmptyConversation();
+    multiLineConv.title = 'First Line\nSecond Line\r\nThird Line';
+    multiLineConv.model = 'Z.ai\nAssistant';
+    multiLineConv.messages = [
+      {
+        index: 0,
+        role: 'user',
+        text: 'Hello',
+        blocks: [{ kind: 'paragraph', text: 'Hello' }]
+      }
+    ];
+
+    const res = await markdownExporter.exportConversation(multiLineConv, { preset: 'obsidian' });
+    const frontmatterMatch = res.previewText.match(/---([\s\S]*?)---/);
+    expect(frontmatterMatch).not.toBeNull();
+    const frontmatter = frontmatterMatch[1];
+    expect(frontmatter).toContain('title: "First Line Second Line Third Line"');
+    expect(frontmatter).toContain('model: "Z.ai Assistant"');
+  });
+});

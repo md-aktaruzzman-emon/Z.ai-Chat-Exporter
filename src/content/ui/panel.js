@@ -665,32 +665,36 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
       exportBtn.classList.remove('success');
       exportBtn.innerHTML = 'Export Now';
 
-      const copyDiagBtn = document.createElement('button');
-      copyDiagBtn.type = 'button';
-      copyDiagBtn.className = 'zaix-btn';
-      copyDiagBtn.style.cssText = 'margin-left: 8px; padding: 2px 6px; font-size: 11px;';
-      copyDiagBtn.textContent = 'Copy diagnostics';
-      copyDiagBtn.addEventListener('click', () => {
-        const diagInfo = {
-          extensionVersion: '2.1.0',
-          host: typeof window !== 'undefined' ? window.location?.host : 'unknown',
-          format: formatSelect.value,
-          diagnostics: diagnostics || { message: text }
-        };
-        if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-          navigator.clipboard.writeText(JSON.stringify(diagInfo, null, 2));
-          copyDiagBtn.textContent = 'Copied!';
-        } else {
-          console.info('[Z.ai Diagnostics]', diagInfo);
-          copyDiagBtn.textContent = 'Logged to console';
-        }
-        setTimeout(() => {
-          copyDiagBtn.textContent = 'Copy diagnostics';
-        }, 2000);
-      });
-      statusEl.appendChild(copyDiagBtn);
+      const createDiagButton = () => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'zaix-btn';
+        btn.style.cssText = 'margin-left: 8px; padding: 2px 6px; font-size: 11px;';
+        btn.textContent = 'Copy diagnostics';
+        btn.addEventListener('click', () => {
+          const diagInfo = {
+            extensionVersion: '2.1.0',
+            host: typeof window !== 'undefined' ? window.location?.host : 'unknown',
+            format: formatSelect.value,
+            diagnostics: diagnostics || { message: text }
+          };
+          if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(JSON.stringify(diagInfo, null, 2));
+            btn.textContent = 'Copied!';
+          } else {
+            console.info('[Z.ai Diagnostics]', diagInfo);
+            btn.textContent = 'Logged to console';
+          }
+          setTimeout(() => {
+            btn.textContent = 'Copy diagnostics';
+          }, 2000);
+        });
+        return btn;
+      };
+
+      statusEl.appendChild(createDiagButton());
       if (footerStatusEl) {
-        footerStatusEl.appendChild(copyDiagBtn.cloneNode(true));
+        footerStatusEl.appendChild(createDiagButton());
       }
     } else {
       statusEl.classList.remove('error');

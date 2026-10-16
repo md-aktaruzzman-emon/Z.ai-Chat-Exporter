@@ -15,10 +15,23 @@ import { anonymizeConversation } from './pii.js';
 function escapeCsv(value) {
   if (value === null || value === undefined) return '""';
   const str = String(value);
-  if (str.includes('"') || str.includes(',') || str.includes('\n') || str.includes('\r')) {
-    return `"${str.replace(/"/g, '""')}"`;
+
+  // Mitigate CSV / DDE formula injection (CWE-1236):
+  // If the cell begins with =, +, -, @, \t, or \r, prepend a single quote so spreadsheet engines treat it as plain text
+  let safeStr = str;
+  if (/^[\s]*[=+\-@\t\r]/.test(safeStr)) {
+    safeStr = `'${safeStr}`;
   }
-  return `"${str}"`;
+
+  if (
+    safeStr.includes('"') ||
+    safeStr.includes(',') ||
+    safeStr.includes('\n') ||
+    safeStr.includes('\r')
+  ) {
+    return `"${safeStr.replace(/"/g, '""')}"`;
+  }
+  return `"${safeStr}"`;
 }
 
 /**

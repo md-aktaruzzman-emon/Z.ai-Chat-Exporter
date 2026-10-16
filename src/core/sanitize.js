@@ -62,42 +62,53 @@ function sanitizeClassName(className) {
 }
 
 /**
- * Validates safe URL protocols: http, https, mailto, tel, data, and relative paths.
- * Blocks javascript: and other dangerous protocols.
+ * Validates safe URL protocols: http, https, mailto, tel, and relative paths.
+ * Blocks javascript:, vbscript:, file:, and disallows data: URLs for hyperlinks (href).
  * @param {string} url
+ * @param {Object} [options]
+ * @param {boolean} [options.isHref=false] - true when validating href attributes
  * @returns {boolean}
  */
-export function isSafeUrl(url) {
+export function isSafeUrl(url, { isHref = false } = {}) {
   if (!url || typeof url !== 'string') return false;
-  const trimmed = url.trim().toLowerCase();
+
+  // Strip ASCII control characters and whitespace
+  const clean = url.replace(/[\x00-\x20\x7F-\x9F]/g, '').toLowerCase();
+
+  // Block dangerous script and filesystem protocols
   if (
-    trimmed.startsWith('javascript:') ||
-    trimmed.startsWith('vbscript:') ||
-    trimmed.startsWith('file:')
+    clean.startsWith('javascript:') ||
+    clean.startsWith('vbscript:') ||
+    clean.startsWith('file:') ||
+    clean.startsWith('about:')
   ) {
     return false;
   }
-  // data: URLs are only safe for non-executable media types (XSS hardening:
-  // data:text/html and data:image/svg+xml can execute script when navigated to)
-  if (trimmed.startsWith('data:')) {
+
+  // Hyperlinks (href) should NEVER navigate to data: URLs (prevents data:text/html and data:image/svg+xml XSS)
+  if (clean.startsWith('data:')) {
+    if (isHref) return false;
+    // For media src attributes, only allow safe raster/audio/video types
     return /^(data:image\/(png|jpe?g|gif|webp|bmp|x-icon|svg\+xml);|data:video\/|data:audio\/|data:font\/)/.test(
-      trimmed
+      clean
     );
   }
+
   if (
-    trimmed.startsWith('http://') ||
-    trimmed.startsWith('https://') ||
-    trimmed.startsWith('mailto:') ||
-    trimmed.startsWith('tel:') ||
-    trimmed.startsWith('data:') ||
-    trimmed.startsWith('/') ||
-    trimmed.startsWith('./') ||
-    trimmed.startsWith('#')
+    clean.startsWith('http://') ||
+    clean.startsWith('https://') ||
+    clean.startsWith('mailto:') ||
+    clean.startsWith('tel:') ||
+    clean.startsWith('/') ||
+    clean.startsWith('./') ||
+    clean.startsWith('../') ||
+    clean.startsWith('#')
   ) {
     return true;
   }
+
   // If no scheme and safe path
-  return !trimmed.includes(':');
+  return !clean.includes(':');
 }
 
 /**
@@ -146,8 +157,12 @@ function sanitizeNode(node) {
         }
 
         // Specific attribute checks
-        if (attrName === 'href' || attrName === 'src') {
-          if (!isSafeUrl(attr.value)) {
+        if (attrName === 'href') {
+          if (!isSafeUrl(attr.value, { isHref: true })) {
+            child.removeAttribute(attr.name);
+          }
+        } else if (attrName === 'src') {
+          if (!isSafeUrl(attr.value, { isHref: false })) {
             child.removeAttribute(attr.name);
           }
         } else if (attrName === 'class') {

@@ -3,7 +3,8 @@
  * Filename template engine and sanitizer adhering to Section 10 rules.
  */
 
-const ILLEGAL_CHARS_REGEX = /[\\/:*?"<>|]/g;
+const ILLEGAL_CHARS_REGEX = /[\\/:*?"<>|\x00-\x1f]/g;
+const RESERVED_NAMES_REGEX = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 const MAX_BASE_LENGTH = 120;
 
 /**
@@ -79,13 +80,24 @@ export function generateFilename({
   // Remove illegal characters and collapse repeated whitespace
   baseName = baseName.replace(ILLEGAL_CHARS_REGEX, '').replace(/\s+/g, ' ').trim();
 
+  // Strip trailing periods and spaces (invalid on Windows filesystems)
+  baseName = baseName.replace(/[. ]+$/, '');
+
   if (!baseName) {
     baseName = `conversation_${date}`;
   }
 
+  // Guard against Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+  if (RESERVED_NAMES_REGEX.test(baseName)) {
+    baseName = `${baseName}_export`;
+  }
+
   // Cap base name length at 120 characters before collision index and extension
   if (baseName.length > MAX_BASE_LENGTH) {
-    baseName = baseName.substring(0, MAX_BASE_LENGTH).trim();
+    baseName = baseName
+      .substring(0, MAX_BASE_LENGTH)
+      .trim()
+      .replace(/[. ]+$/, '');
   }
 
   // Add deduplication suffix if collisionIndex > 1

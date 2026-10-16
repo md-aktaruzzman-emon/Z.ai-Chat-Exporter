@@ -5,7 +5,7 @@
  */
 
 import { generateFilename } from '../core/utils/filename.js';
-import { sanitizeHtml, isSafeUrl } from '../core/sanitize.js';
+import { isSafeUrl } from '../core/sanitize.js';
 import { anonymizeConversation } from './pii.js';
 import { renderMathToHtml } from '../core/math-renderer.js';
 import { KATEX_CSS } from '../core/katex-css.js';
@@ -89,14 +89,15 @@ function buildStandaloneHtml(conv, theme) {
         } else if (block.kind === 'quote') {
           contentHtml += `<blockquote style="border-left:4px solid #4f46e5; padding-left:16px; margin:12px 0; color:#6b7280; font-style:italic;">${block.html || escapeHtml(block.text || '')}</blockquote>`;
         } else if (block.kind === 'image') {
-          const src = block.dataUrl || block.src || '';
+          const rawSrc = block.dataUrl || block.src || '';
+          const src = isSafeUrl(rawSrc, { isHref: false }) ? rawSrc : '';
           contentHtml += `<div style="margin:14px 0; text-align:center;"><img src="${src}" alt="${escapeHtml(block.alt || 'Image')}" style="max-width:100%; height:auto; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1);" />${block.caption ? `<div style="font-size:12px; color:#6b7280; margin-top:4px;">${escapeHtml(block.caption)}</div>` : ''}</div>`;
         } else if (block.kind === 'thinking') {
           contentHtml += `<details style="margin:10px 0; padding:10px 14px; background:rgba(100,116,139,0.08); border-radius:6px; border-left:3px solid #94a3b8;"><summary style="cursor:pointer; font-weight:600; color:#64748b; font-size:13px;">Thinking Process</summary><div style="margin-top:8px; font-size:13px; color:#64748b; line-height:1.5;">${escapeHtml(block.text)}</div></details>`;
         } else if (block.kind === 'table') {
           contentHtml += `<div style="overflow-x:auto; margin:14px 0;">${block.html}</div>`;
         } else if (block.kind === 'citation') {
-          const safeHref = isSafeUrl(block.url) ? block.url : '#';
+          const safeHref = isSafeUrl(block.url, { isHref: true }) ? block.url : '#';
           contentHtml += `<div style="font-size:12px; color:#2563eb; margin:6px 0;">🔗 <a href="${safeHref}" target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:underline;">${escapeHtml(block.title)}</a> ${block.snippet ? `— <em>${escapeHtml(block.snippet)}</em>` : ''}</div>`;
         } else if (block.kind === 'artifact') {
           contentHtml += `<div style="margin:14px 0; padding:12px 16px; border:1px solid ${border}; border-radius:8px; background:rgba(0,0,0,0.02);"><div style="font-weight:600; font-size:13px; color:#64748b; margin-bottom:6px;">📦 ${escapeHtml(block.title || 'Artifact')}</div><div>${block.html}</div></div>`;
@@ -121,7 +122,7 @@ function buildStandaloneHtml(conv, theme) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${sanitizeHtml(conv.title)}</title>
+  <title>${escapeHtml(conv.title)}</title>
   <style>
     ${KATEX_CSS}
     body {
@@ -187,8 +188,8 @@ function buildStandaloneHtml(conv, theme) {
 <body>
   <div class="container">
     <header>
-      <h1>${sanitizeHtml(conv.title)}</h1>
-      <div class="meta">Model: ${sanitizeHtml(conv.model)} &bull; Exported: ${new Date(conv.createdAt).toLocaleString()}</div>
+      <h1>${escapeHtml(conv.title)}</h1>
+      <div class="meta">Model: ${escapeHtml(conv.model)} &bull; Exported: ${new Date(conv.createdAt).toLocaleString()}</div>
     </header>
     <main>
       ${messagesHtml}

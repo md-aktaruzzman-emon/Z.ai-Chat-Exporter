@@ -72,12 +72,25 @@ export function anonymizeConversation(conversation) {
           if (block.outputSummary) block.outputSummary = anonymizePiiText(block.outputSummary);
           // URLs: strip credentials/tokens from query strings (emails, api keys, tokens)
           if (block.url) block.url = redactUrlPii(block.url);
+          // Inline runs (consumed directly by docx, markdown, and pdf-vector)
+          if (Array.isArray(block.runs)) {
+            for (const run of block.runs) {
+              if (run?.text) run.text = anonymizePiiText(run.text);
+              if (run?.link) run.link = redactUrlPii(run.link);
+            }
+          }
           // Table cells (rows contain {text, html} cell objects)
           if (Array.isArray(block.rows)) {
             for (const row of block.rows) {
               for (const cell of row) {
                 if (cell?.text) cell.text = anonymizePiiText(cell.text);
                 if (cell?.html) cell.html = anonymizePiiText(cell.html);
+                if (Array.isArray(cell?.runs)) {
+                  for (const run of cell.runs) {
+                    if (run?.text) run.text = anonymizePiiText(run.text);
+                    if (run?.link) run.link = redactUrlPii(run.link);
+                  }
+                }
               }
             }
           }
@@ -89,11 +102,17 @@ export function anonymizeConversation(conversation) {
               if (item?.url) item.url = redactUrlPii(item.url);
             }
           }
-          // List items ({text, html})
+          // List items ({text, html, runs})
           if (Array.isArray(block.items)) {
             for (const item of block.items) {
               if (item?.text) item.text = anonymizePiiText(item.text);
               if (item?.html) item.html = anonymizePiiText(item.html);
+              if (Array.isArray(item?.runs)) {
+                for (const run of item.runs) {
+                  if (run?.text) run.text = anonymizePiiText(run.text);
+                  if (run?.link) run.link = redactUrlPii(run.link);
+                }
+              }
             }
           }
         }

@@ -188,16 +188,8 @@ chrome.contextMenus?.onClicked?.addListener(async (info, tab) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== 'object') return false;
 
-  // IMPORTANT: Do not intercept messages meant for the offscreen document
-  const OFFSCREEN_TYPES = [
-    'RENDER_EXPORT',
-    'HISTORY_SAVE',
-    'HISTORY_LIST',
-    'HISTORY_GET',
-    'HISTORY_DELETE',
-    'HISTORY_CLEAR'
-  ];
-  if (message.target === 'offscreen' || OFFSCREEN_TYPES.includes(message.type)) {
+  // IMPORTANT: Do not intercept messages already targeted to the offscreen document
+  if (message.target === 'offscreen' || message.type === 'RENDER_EXPORT') {
     return false; // Let offscreen document handle it
   }
 
@@ -207,6 +199,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'EXPORT_REQUEST',
     'OPEN_PREVIEW',
     'OPEN_PREVIEW_REQUEST',
+    'HISTORY_SAVE',
+    'HISTORY_LIST',
+    'HISTORY_GET',
+    'HISTORY_DELETE',
+    'HISTORY_CLEAR',
     'PROFILE_GET',
     'PROFILE_SAVE',
     'PROFILE_EXPORT',

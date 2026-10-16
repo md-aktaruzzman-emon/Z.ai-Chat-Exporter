@@ -74,10 +74,12 @@ export async function exportConversation(originalConversation, options = {}) {
 
   // Frontmatter / Title
   if (preset === 'obsidian') {
+    const safeTitle = (conv.title || '').replace(/\r?\n/g, ' ').replace(/"/g, '\\"');
+    const safeModel = (conv.model || '').replace(/\r?\n/g, ' ').replace(/"/g, '\\"');
     lines.push('---');
-    lines.push(`title: "${conv.title.replace(/"/g, '\\"')}"`);
+    lines.push(`title: "${safeTitle}"`);
     lines.push(`date: ${new Date(conv.createdAt).toISOString()}`);
-    lines.push(`model: "${conv.model}"`);
+    lines.push(`model: "${safeModel}"`);
     lines.push('tags: [zai, export, ai-chat]');
     lines.push('---\n');
   }

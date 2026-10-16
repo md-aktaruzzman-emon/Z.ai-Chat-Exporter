@@ -7,7 +7,7 @@
 
 import html2pdf from 'html2pdf.js';
 import { generateFilename } from '../core/utils/filename.js';
-import { sanitizeHtml } from '../core/sanitize.js';
+import { sanitizeHtml, isSafeUrl } from '../core/sanitize.js';
 import { anonymizeConversation } from './pii.js';
 import { renderMathToHtml } from '../core/math-renderer.js';
 import { KATEX_CSS } from '../core/katex-css.js';
@@ -68,7 +68,8 @@ export function buildRenderHtml(conv, theme) {
         } else if (block.kind === 'table') {
           contentHtml += `<div style="overflow-x: auto; margin: 12px 0; page-break-inside: avoid;" class="zaix-table-wrapper">${block.html}</div>`;
         } else if (block.kind === 'image') {
-          const src = block.dataUrl || block.src || '';
+          const rawSrc = block.dataUrl || block.src || '';
+          const src = isSafeUrl(rawSrc, { isHref: false }) ? rawSrc : '';
           contentHtml += `<div style="margin: 12px 0; text-align: center; page-break-inside: avoid;"><img src="${src}" alt="${sanitizeHtml(block.alt || 'Image')}" style="max-width: 100%; height: auto; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);" /></div>`;
         } else if (block.kind === 'quote') {
           contentHtml += `<blockquote style="border-left: 4px solid #6366f1; padding-left: 14px; margin: 10px 0; color: #64748b; font-style: italic;">${block.html || sanitizeHtml(block.text || '')}</blockquote>`;
@@ -91,7 +92,8 @@ export function buildRenderHtml(conv, theme) {
           const sizePart = block.size ? ` (${sanitizeHtml(block.size)})` : '';
           contentHtml += `<div style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; margin: 6px 0; background: ${isDark ? '#1e293b' : '#f8fafc'}; border: 1px solid ${border}; border-radius: 6px; font-size: 12px;"><span>${block.icon || '📎'}</span><span style="font-weight: 600;">${sanitizeHtml(block.name || 'Attachment')}</span><span style="color: #64748b;">${sizePart}</span></div>`;
         } else if (block.kind === 'citation') {
-          contentHtml += `<div style="margin: 4px 0; font-size: 12px; color: #6366f1;">🔗 <a href="${sanitizeHtml(block.url || '')}" style="color: inherit; text-decoration: underline;" target="_blank">${sanitizeHtml(block.title || block.url || 'Source')}</a></div>`;
+          const safeHref = isSafeUrl(block.url, { isHref: true }) ? block.url : '#';
+          contentHtml += `<div style="margin: 4px 0; font-size: 12px; color: #6366f1;">🔗 <a href="${safeHref}" style="color: inherit; text-decoration: underline;" target="_blank">${sanitizeHtml(block.title || block.url || 'Source')}</a></div>`;
         } else {
           contentHtml +=
             block.html ||
