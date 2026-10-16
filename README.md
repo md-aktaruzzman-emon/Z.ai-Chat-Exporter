@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/privacy-100%25%20client--side-green?style=flat-square" alt="100% Client-Side Privacy" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" alt="License MIT" /></a>
   <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Passing" />
-  <img src="https://img.shields.io/badge/tests-73%20passed-brightgreen?style=flat-square" alt="Tests 73 Passed" />
+  <img src="https://img.shields.io/badge/tests-82%20passed-brightgreen?style=flat-square" alt="Tests 82 Passed" />
 </p>
 
 <h3 align="center">
@@ -58,7 +58,9 @@ Exporting AI conversation transcripts from modern single-page applications often
 | 📝 **Native Word / DOCX Generation** | Builds genuine Microsoft Word OpenXML (`.docx`) files with native heading levels (`Heading 1–3`), zebra-striped tables (`cantSplit` row protection), monospaced code blocks, and formatted callouts. |
 | 📐 **Offline KaTeX Formula Rendering** | Renders LaTeX equations offline without external CDN dependencies: high-DPI vector SVG paths for PDF, native Word styling, and self-contained HTML equations. |
 | 🇧🇩 **Bengali & Complex Script Support** | Combines standard Latin typography with high-DPI SVG glyph rasterization and coalesced text runs, resolving Bengali and Indic diacritic rendering and conjunct glyph layout. |
-| 🧹 **Client-Side PII Anonymization** | Local regular expression engine redacts email addresses, telephone numbers, API keys (`sk-...`), bearer tokens, and JWT credentials before file serialization. |
+| 🧹 **Deep PII Anonymization** | Local regular expression engine redacts email addresses, telephone numbers, API keys (`sk-...`), bearer tokens, and JWT credentials across top-level blocks and inline runs (paragraphs, lists, and tables) before file serialization. |
+| 🛡️ **Formula & Navigation Injection Defenses** | Neutralizes spreadsheet formula injection (CWE-1236) in CSV exports with leading quote guards, enforces strict protocol whitelisting (`http:`, `https:`, `mailto:`) on hyperlink navigations, and escapes document titles. |
+| 💎 **Glassmorphism UI & 3D Emblem** | Modern popup and options interfaces featuring backdrop blur, vibrant emerald accents, status indicators, and custom 3D metallic emblem iconography. |
 | 🔒 **100% Client-Side Processing** | Zero third-party API calls, zero analytics trackers, and zero telemetry. All document compilation, image rendering, and file downloads execute strictly within browser memory. |
 | 🌍 **Bilingual Interface** | Full user interface localization in English (`en`) and Bengali (`bn`), configurable in the extension popup and options page. |
 
@@ -213,8 +215,9 @@ Z.ai Chat Exporter adheres strictly to client-side data security principles:
   - `offscreen`: Executes the document compilation engines in a secure offscreen sandbox as mandated by Chrome Manifest V3.
   - `contextMenus` *(optional)*: Requested only on demand if the user enables the context menu shortcut in Settings.
   - `host_permissions`: Strictly constrained to `https://chat.z.ai/*`, `https://z.ai/*`, and `https://*.z.ai/*`.
-- **Strict Content Security Policy (CSP):** Configured as `"script-src 'self'; object-src 'self'"`, prohibiting remote code execution.
-- **HTML Sanitization:** All incoming markup is sanitized using DOMPurify before parsing or rendering to guard against XSS injection attacks.
+- **Strict Content Security Policy (CSP):** Configured as `"script-src 'self'; object-src 'self'"`, prohibiting remote code execution. KaTeX and all math assets execute locally with zero external network access.
+- **HTML & URL Sanitization:** Incoming markup is sanitized using DOMPurify before parsing. Hyperlink URLs (`<a href>`) are strictly validated against `javascript:`, `vbscript:`, and `data:` navigation attacks, control characters are stripped, and document titles are escaped to prevent tag breakout.
+- **Spreadsheet Formula Neutralization:** Cells beginning with formula trigger characters (`=`, `+`, `-`, `@`, `\t`, `\r`) are automatically escaped with leading single quotes (`'`) in CSV exports to neutralize formula injection (CWE-1236).
 
 ---
 
@@ -223,7 +226,7 @@ Z.ai Chat Exporter adheres strictly to client-side data security principles:
 The project maintains an automated test suite powered by [Vitest](https://vitest.dev/) to verify scraper heuristics, layout measurement, Unicode rendering, and multi-format exporters.
 
 ```bash
-# Run complete test suite (73 tests)
+# Run complete test suite (82 tests)
 npm test
 
 # Run tests in interactive watch mode
@@ -252,13 +255,13 @@ npm run build
 
 ```text
  ✓ tests/formatting-quality.test.js  (13 tests)
- ✓ tests/rich-exporters.test.js      (18 tests)
- ✓ tests/exporters.test.js           (28 tests)
+ ✓ tests/rich-exporters.test.js      (22 tests)
+ ✓ tests/exporters.test.js           (33 tests)
  ✓ tests/structural-scraper.test.js  (14 tests)
 
  Test Files  4 passed (4)
-      Tests  73 passed (73)
-   Duration  2.97s
+      Tests  82 passed (82)
+   Duration  2.95s
 ```
 
 ### Verified Capabilities in Test Suite
@@ -345,7 +348,9 @@ Z.ai-Chat-Exporter/
 - [x] Native OpenXML Word (`.docx`) with styled tables and outline headings.
 - [x] Bi-directional virtualized DOM collector with authenticated Z.ai API fallback.
 - [x] Transparent SVG glyph rasterization for Bengali and Indic complex scripts.
-- [x] Prettier and ESLint integration with 73 automated Vitest unit & regression tests.
+- [x] Prettier and ESLint integration with 82 automated Vitest unit & regression tests.
+- [x] Glassmorphism UI redesign with modern aesthetics and custom 3D metallic emblem iconography.
+- [x] Comprehensive security hardening (CWE-1236 CSV formula defense, safe URL scheme whitelist, deep inline run PII redaction).
 - [ ] Direct export to cloud storage providers (Google Drive, Dropbox, OneDrive) via user OAuth tokens.
 - [ ] Custom PDF themes and font family selection (Noto Serif, Roboto, JetBrains Mono) in Settings.
 - [ ] Export directly to Notion database via Notion API integration.
