@@ -28,6 +28,22 @@ import { sanitizeHtml } from '../core/sanitize.js';
 export function classifyRole(el, index = 0) {
   if (!el) return index % 2 === 0 ? 'user' : 'assistant';
 
+  // 0. High-confidence Z.ai Svelte 5 / Open WebUI specific element signatures
+  if (
+    el.classList?.contains('user-message') ||
+    el.querySelector?.('.user-message, .edit-user-message-button')
+  ) {
+    return 'user';
+  }
+
+  if (
+    el.id === 'response-content-container' ||
+    el.classList?.contains('markdown-prose') ||
+    el.querySelector?.('#response-content-container, .markdown-prose, .regenerate-response-button')
+  ) {
+    return 'assistant';
+  }
+
   // 1. data-role attribute or data-message-author-role or data-author
   const dataRole =
     el.getAttribute('data-role') ||
@@ -1083,19 +1099,23 @@ export function extractConversationId(
     const parsed = new URL(url, 'https://chat.z.ai');
     const path = parsed.pathname;
 
-    // 1. Pathname patterns: /c/<id>, /s/<id>, /chat/<id>, /conversation/<id>
-    const pathMatch = path.match(/\/(?:c|s|chat|conversation)\/([a-zA-Z0-9_\-]+)/i);
+    // 1. Pathname patterns: /c/<id>, /s/<id>, /chat/<id>, /conversation/<id>, /agent/<id>, /task/<id>
+    const pathMatch = path.match(
+      /\/(?:c|s|chat|chats|conversation|agent|task|session)\/([a-zA-Z0-9_\-]+)/i
+    );
     if (pathMatch && pathMatch[1]) {
       return pathMatch[1];
     }
 
-    // 2. Query parameter patterns: ?c=<id>, ?id=<id>, ?chatId=<id>
+    // 2. Query parameter patterns: ?c=<id>, ?id=<id>, ?chatId=<id>, ?shareId=<id>
     const searchParams = parsed.searchParams;
     const qId =
       searchParams.get('c') ||
       searchParams.get('id') ||
       searchParams.get('chatId') ||
-      searchParams.get('conversationId');
+      searchParams.get('conversationId') ||
+      searchParams.get('shareId') ||
+      searchParams.get('share_id');
     if (qId && /^[a-zA-Z0-9_\-]+$/.test(qId)) {
       return qId;
     }
@@ -1118,7 +1138,7 @@ export function extractConversationId(
 
     // Check active chat anchor in sidebar
     const activeLink = doc.querySelector(
-      'a[href*="/c/"][class*="active" i], a[href*="/c/"][aria-selected="true"]'
+      'a[href*="/c/"][class*="active" i], a[href*="/c/"][class*="selected" i], a[href*="/c/"][aria-selected="true"], a[href*="/c/"][aria-current]'
     );
     if (activeLink) {
       const href = activeLink.getAttribute('href') || '';
@@ -1138,23 +1158,70 @@ export function extractConversationId(
  * @param {Object} [options]
  * @returns {Promise<import('../core/conversation-model.js').Conversation|null>}
  */
-export async function fetchConversationFromApi(conversationId, _options = {}) {
+export async function fetchConversationFromApi(conversationId, options = {}) {
   if (!conversationId || typeof fetch !== 'function') return null;
 
-  const candidateEndpoints = [
-    `/api/v1/chats/${conversationId}`,
-    `/api/chats/${conversationId}`,
-    `/api/conversation/${conversationId}`,
-    `/api/v1/conversation/${conversationId}`
-  ];
+  // 1. Retrieve authentication token from options, localStorage, or sessionStorage
+  let authToken = options.token || '';
+  if (!authToken) {
+    try {
+      const storage =
+        (typeof window !== 'undefined' && window.localStorage) ||
+        (typeof globalThis !== 'undefined' && globalThis.localStorage) ||
+        null;
+      if (storage) {
+        const localToken = storage.getItem('token') || storage.getItem('z_ai_session_t') || '';
+        if (localToken && localToken !== 'undefined' && localToken !== 'null') {
+          authToken = localToken.replace(/^Bearer\s+/i, '').trim();
+        }
+      }
+      if (!authToken) {
+        const sStorage =
+          (typeof window !== 'undefined' && window.sessionStorage) ||
+          (typeof globalThis !== 'undefined' && globalThis.sessionStorage) ||
+          null;
+        if (sStorage) {
+          const sessionToken = sStorage.getItem('token') || '';
+          if (sessionToken && sessionToken !== 'undefined' && sessionToken !== 'null') {
+            authToken = sessionToken.replace(/^Bearer\s+/i, '').trim();
+          }
+        }
+      }
+    } catch {
+      // ignore storage restrictions
+    }
+  }
+
+  // 2. Detect if route is a shared chat link
+  const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
+  const isShareUrl = /\/s\/[a-zA-Z0-9_\-]+/i.test(currentUrl);
+
+  const candidateEndpoints = isShareUrl
+    ? [
+        `/api/v1/chats/share/${conversationId}`,
+        `/api/chats/share/${conversationId}`,
+        `/api/v1/chats/${conversationId}`,
+        `/api/chats/${conversationId}`
+      ]
+    : [
+        `/api/v1/chats/${conversationId}`,
+        `/api/v1/chats/share/${conversationId}`,
+        `/api/agent/v1/chats/${conversationId}`,
+        `/api/chats/${conversationId}`,
+        `/api/conversation/${conversationId}`,
+        `/api/v1/conversation/${conversationId}`
+      ];
+
+  const headers = {
+    Accept: 'application/json',
+    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
+  };
 
   for (const endpoint of candidateEndpoints) {
     try {
       const response = await fetch(endpoint, {
         method: 'GET',
-        headers: {
-          Accept: 'application/json'
-        },
+        headers,
         credentials: 'include'
       });
 
@@ -1164,31 +1231,70 @@ export async function fetchConversationFromApi(conversationId, _options = {}) {
       if (!data) continue;
 
       // Extract conversation title and model
-      const title = data.title || data.chat?.title || data.data?.title || '';
-      const model = data.model || data.chat?.model || data.data?.model || 'GLM-5.3-Flash';
+      const chatObj = data.chat || data.data?.chat || data;
+      const title = data.title || chatObj?.title || data.data?.title || '';
+      const model =
+        chatObj?.models?.[0] || chatObj?.model || data.model || data.data?.model || 'GLM-5.3-Flash';
 
-      // Open WebUI / Z.ai structure: data.messages or data.chat.messages
-      let rawMessages =
-        data.messages ||
-        data.chat?.messages ||
-        data.data?.messages ||
-        (data.chat_messages ? Object.values(data.chat_messages) : null);
+      let rawMessages = null;
 
-      // If message IDs list returned, attempt batch retrieval
+      // 3. Open WebUI / Z.ai Tree History structure: chat.history.messages or history.messages
+      const historyObj = chatObj?.history || data.history || null;
+      if (historyObj && historyObj.messages && typeof historyObj.messages === 'object') {
+        const messagesMap = historyObj.messages;
+        const currentId = historyObj.currentId;
+
+        // Follow branch backwards from currentId using parentId (Z.ai's exact tree linearization)
+        if (currentId && messagesMap[currentId]) {
+          const branch = [];
+          let cur = messagesMap[currentId];
+          const visited = new Set();
+          while (cur && !visited.has(cur.id)) {
+            visited.add(cur.id);
+            branch.unshift(cur);
+            cur = cur.parentId && messagesMap[cur.parentId] ? messagesMap[cur.parentId] : null;
+          }
+          if (branch.length > 0) {
+            rawMessages = branch;
+          }
+        }
+
+        // Fallback: sort all messages chronologically by timestamp
+        if (!rawMessages || rawMessages.length === 0) {
+          rawMessages = Object.values(messagesMap).sort((a, b) => {
+            const ta = a.timestamp || a.created_at || 0;
+            const tb = b.timestamp || b.created_at || 0;
+            return ta - tb;
+          });
+        }
+      }
+
+      // 4. Flat messages array: data.messages or chat.messages
+      if (!rawMessages || rawMessages.length === 0) {
+        rawMessages =
+          data.messages ||
+          chatObj?.messages ||
+          data.data?.messages ||
+          (data.chat_messages ? Object.values(data.chat_messages) : null);
+      }
+
+      // 5. If message IDs list returned, attempt batch retrieval
+      const messageIds = data.message_ids || chatObj?.message_ids || null;
       if (
         (!rawMessages || rawMessages.length === 0) &&
-        Array.isArray(data.message_ids) &&
-        data.message_ids.length > 0
+        Array.isArray(messageIds) &&
+        messageIds.length > 0
       ) {
         try {
           const batchRes = await fetch(`/api/v1/chats/${conversationId}/messages/batch`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              Accept: 'application/json'
+              Accept: 'application/json',
+              ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
             },
             credentials: 'include',
-            body: JSON.stringify({ message_ids: data.message_ids })
+            body: JSON.stringify({ ids: messageIds, message_ids: messageIds })
           });
           if (batchRes.ok) {
             const batchData = await batchRes.json();
@@ -1213,7 +1319,10 @@ export async function fetchConversationFromApi(conversationId, _options = {}) {
         // Support Open WebUI / Z.ai content_blocks array
         if (Array.isArray(item.content_blocks) && item.content_blocks.length > 0) {
           for (const cb of item.content_blocks) {
-            if (cb.type === 'reasoning' && cb.content) {
+            if (
+              (cb.type === 'reasoning' || cb.type === 'thought' || cb.type === 'thinking') &&
+              cb.content
+            ) {
               blocks.push({ kind: 'thinking', text: cb.content });
             } else if (cb.type === 'text' && cb.content) {
               hasTextBlock = true;
@@ -1231,9 +1340,41 @@ export async function fetchConversationFromApi(conversationId, _options = {}) {
           }
         }
 
+        // Extract <details> thinking/reasoning tag if embedded in content
+        if (
+          typeof content === 'string' &&
+          content.includes('<details') &&
+          content.includes('</details>')
+        ) {
+          const detailsMatch = content.match(/<details[^>]*>([\s\S]*?)<\/details>/i);
+          if (detailsMatch) {
+            const thinkingText = detailsMatch[1].replace(/<summary[\s\S]*?<\/summary>/i, '').trim();
+            if (thinkingText && !blocks.some((b) => b.kind === 'thinking')) {
+              blocks.unshift({ kind: 'thinking', text: thinkingText });
+            }
+            content = content.replace(/<details[^>]*>[\s\S]*?<\/details>/gi, '').trim();
+          }
+        }
+
         // If content exists and was not already parsed via content_blocks
         if (content && !hasTextBlock) {
           blocks.push(...parseMarkdownToBlocks(content));
+        }
+
+        // Attachments / files attached to message
+        if (Array.isArray(item.files) && item.files.length > 0) {
+          for (const f of item.files) {
+            const fName = f.name || f.filename || 'attachment';
+            const ext = fName.split('.').pop()?.toUpperCase() || 'FILE';
+            const size = f.size ? `${(f.size / 1024 / 1024).toFixed(1)} MB` : '';
+            blocks.unshift({
+              kind: 'attachment',
+              name: fName,
+              ext,
+              size,
+              icon: ext === 'PDF' ? '📄' : ext === 'MD' ? '📝' : '📎'
+            });
+          }
         }
 
         const msgObj = {
@@ -1289,14 +1430,25 @@ export class FullConversationCollector {
   getMessageIdentity(bubble, role, prevId = '') {
     if (!bubble) return `${role}:${Date.now()}:${Math.random()}`;
 
-    // 1. Explicit DOM attributes
+    // 1. Explicit DOM attributes (excluding generic static IDs like 'response-content-container')
     const explicitId =
       bubble.getAttribute('data-message-id') ||
       bubble.getAttribute('data-id') ||
       bubble.getAttribute('id') ||
       bubble.getAttribute('data-key');
-    if (explicitId && /^[\w\-:]{4,}$/.test(explicitId)) {
+    if (
+      explicitId &&
+      /^[\w\-:]{4,}$/.test(explicitId) &&
+      !/^(response-content-container|messages-container|chat-container|app|root)$/i.test(explicitId)
+    ) {
       return explicitId;
+    }
+
+    // Check closest unique ID starting with message-
+    const closestMsgEl = bubble.closest?.('[id^="message-"]:not([id="messages-container"])');
+    if (closestMsgEl && closestMsgEl.id && closestMsgEl.id !== 'messages-container') {
+      const cleanId = closestMsgEl.id.replace(/-start$/i, '');
+      if (cleanId) return cleanId;
     }
 
     // 2. Position or index attributes

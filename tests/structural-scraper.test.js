@@ -350,4 +350,127 @@ Final paragraph.
     expect(id1).toContain('user:8:Continue:Continue');
     expect(id3).toContain('__after_');
   });
+
+  it('handles Z.ai Svelte 5 tree history linearization and Bearer auth in fetchConversationFromApi', async () => {
+    const storageSpy = vi
+      .spyOn(globalThis.Storage.prototype, 'getItem')
+      .mockImplementation((key) => {
+        if (key === 'token') return 'test_bearer_jwt_token';
+        return null;
+      });
+
+    const mockSvelte5Response = {
+      data: {
+        chat: {
+          title: 'Z.ai Svelte 5 Architecture',
+          history: {
+            currentId: 'msg-3',
+            messages: {
+              'msg-1': {
+                id: 'msg-1',
+                parentId: null,
+                role: 'user',
+                content: 'What is new in Z.ai update?'
+              },
+              'msg-2': {
+                id: 'msg-2',
+                parentId: 'msg-1',
+                role: 'assistant',
+                content:
+                  'Z.ai now uses Svelte 5 runes and GLM-5.3-Flash.\n\n```python\nprint("Svelte 5")\n```'
+              },
+              'msg-3': {
+                id: 'msg-3',
+                parentId: 'msg-2',
+                role: 'user',
+                content: 'How does history work?'
+              }
+            }
+          }
+        }
+      }
+    };
+
+    let capturedHeaders = null;
+    let capturedUrl = null;
+
+    globalThis.fetch = vi.fn().mockImplementation((url, init) => {
+      capturedUrl = url;
+      capturedHeaders = init?.headers;
+      return Promise.resolve({
+        ok: true,
+        json: async () => mockSvelte5Response
+      });
+    });
+
+    try {
+      const conv = await fetchConversationFromApi('svelte5-conv-id');
+      expect(conv).toBeDefined();
+      expect(conv.title).toBe('Z.ai Svelte 5 Architecture');
+      expect(capturedUrl).toContain('/api/v1/chats/svelte5-conv-id');
+      expect(capturedHeaders?.['Authorization']).toBe('Bearer test_bearer_jwt_token');
+
+      // Messages must be properly linearized: msg-1 -> msg-2 -> msg-3
+      expect(conv.messages.length).toBe(3);
+      expect(conv.messages[0].id).toBe('msg-1');
+      expect(conv.messages[0].role).toBe('user');
+      expect(conv.messages[0].text).toBe('What is new in Z.ai update?');
+
+      expect(conv.messages[1].id).toBe('msg-2');
+      expect(conv.messages[1].role).toBe('assistant');
+      expect(conv.messages[1].blocks.some((b) => b.kind === 'code')).toBe(true);
+
+      expect(conv.messages[2].id).toBe('msg-3');
+      expect(conv.messages[2].role).toBe('user');
+      expect(conv.messages[2].text).toBe('How does history work?');
+    } finally {
+      storageSpy.mockRestore();
+    }
+  });
+
+  it('collects multiple assistant messages sharing static id="response-content-container" without dropping duplicates', async () => {
+    const collector = new FullConversationCollector();
+    const mockContainer = document.createElement('div');
+    mockContainer.id = 'messages-container';
+
+    // In modern Z.ai, every assistant bubble has id="response-content-container"
+    mockContainer.innerHTML = `
+      <div class="user-message">User prompt 1: Start</div>
+      <div id="response-content-container" class="markdown-prose">Assistant response 1: First answer</div>
+      <div class="user-message">User prompt 2: Continue</div>
+      <div id="response-content-container" class="markdown-prose">Assistant response 2: Second answer</div>
+    `;
+
+    document.body.appendChild(mockContainer);
+
+    try {
+      const bubbles = Array.from(mockContainer.children);
+      expect(bubbles.length).toBe(4);
+
+      // Verify getMessageIdentity does not use the static id="response-content-container"
+      const asstId1 = collector.getMessageIdentity(bubbles[1], 'assistant', 'user1');
+      const asstId2 = collector.getMessageIdentity(bubbles[3], 'assistant', 'user2');
+      expect(asstId1).not.toBe('response-content-container');
+      expect(asstId2).not.toBe('response-content-container');
+      expect(asstId1).not.toBe(asstId2);
+
+      const collected = await collector.collectAll(mockContainer, {
+        maxScrollAttempts: 1,
+        settleDelayMs: 0
+      });
+
+      // All 4 messages must be collected! None should be dropped!
+      expect(collected.length).toBe(4);
+      expect(collected[0].role).toBe('user');
+      expect(collected[0].text).toContain('User prompt 1');
+      expect(collected[1].role).toBe('assistant');
+      expect(collected[1].text).toContain('Assistant response 1');
+      expect(collected[2].role).toBe('user');
+      expect(collected[2].text).toContain('User prompt 2');
+      expect(collected[3].role).toBe('assistant');
+      expect(collected[3].text).toContain('Assistant response 2');
+    } finally {
+      document.body.removeChild(mockContainer);
+    }
+  });
 });

@@ -124,12 +124,12 @@ export const THREAD_CANDIDATES = [
 ];
 
 export const MESSAGE_CANDIDATES = [
+  // Modern Z.ai Svelte 5 / Open WebUI turn pairs
+  '.user-message, #response-content-container, .chat-assistant, .assistant-message',
+  'div.user-message, div#response-content-container, div.chat-user, div.chat-assistant, div.assistant-message',
+  '.user-message, .markdown-prose',
   'div[id^="message-"]',
   '[id^="message-"]',
-  'div.user-message, div.chat-user, div.chat-assistant',
-  '[class*="user-message" i]',
-  '[class*="chat-user" i]',
-  '[class*="chat-assistant" i]',
   '[data-message-id]',
   '[data-message-author-role]',
   '[data-role="user"], [data-role="assistant"]',
@@ -138,7 +138,7 @@ export const MESSAGE_CANDIDATES = [
   '[data-testid*="message" i]',
   '[data-testid*="chat-item" i]',
   '[data-testid*="chat-message" i]',
-  'div[class*="user-message" i], div[class*="assistant-message" i]',
+  'div[class*="user-message" i], div[class*="assistant-message" i], div[class*="chat-assistant" i], div[class*="chat-user" i]',
   'div[class*="bot-message" i], div[class*="ai-message" i]',
   '[class*="message-item" i]',
   '[class*="message_item" i]',
@@ -521,6 +521,13 @@ export function locate(overrideProfile) {
         }
       }
     }
+  }
+
+  // Filter out any descendant elements if an ancestor is already included in messageBubbles
+  if (messageBubbles.length > 1) {
+    messageBubbles = messageBubbles.filter((bubble, idx) => {
+      return !messageBubbles.some((other, otherIdx) => otherIdx !== idx && other.contains(bubble));
+    });
   }
 
   // Section 11.8: When zero usable message bubbles are found, log each candidate selector and match count
