@@ -43,12 +43,16 @@ export function createFloatingButton({ onClick }) {
   let isDragging = false;
   let startX = 0;
   let startY = 0;
+  let downScreenX = 0;
+  let downScreenY = 0;
   let hasMoved = false;
 
   btn.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     isDragging = true;
     hasMoved = false;
+    downScreenX = e.clientX;
+    downScreenY = e.clientY;
     startX = e.clientX - btn.getBoundingClientRect().left;
     startY = e.clientY - btn.getBoundingClientRect().top;
     e.preventDefault();
@@ -56,6 +60,8 @@ export function createFloatingButton({ onClick }) {
 
   window.addEventListener('mousemove', (e) => {
     if (!isDragging) return;
+    const dist = Math.hypot(e.clientX - downScreenX, e.clientY - downScreenY);
+    if (dist < 5) return;
     hasMoved = true;
     let newLeft = e.clientX - startX;
     let newTop = e.clientY - startY;

@@ -121,6 +121,7 @@ function initContainer() {
     onExport: handleExport,
     onPreview: handlePreview,
     onHistory: handleHistory,
+    onCopyMd: handleCopyMd,
     onThemeChange: (theme) => {
       const resolved = theme === 'auto' ? detectTheme() : theme;
       shadowRootHost.setAttribute('data-theme', resolved);
@@ -157,17 +158,35 @@ async function openPanel() {
     shadowRootHost.setAttribute('data-theme', currentOptions.theme || 'light');
   }
 
+  // Set initial status while detecting
+  panelInstance.setStatus('Detecting conversation...');
+
   try {
     const isBusy = isStreaming();
     panelInstance.setStreaming(isBusy);
 
-    const conv = await scrapeConversation({ waitForStream: false });
-    panelInstance.setConversationData(conv);
+    // Use quick mode (immediate mounted bubbles or fast API call) so stats populate instantly
+    const conv = await scrapeConversation({ waitForStream: false, quick: true });
+    if (conv && Array.isArray(conv.messages) && conv.messages.length > 0) {
+      panelInstance.setConversationData(conv);
+      if (!isBusy) {
+        panelInstance.setStatus('');
+      }
+    } else {
+      panelInstance.setStatus(
+        'No active conversation open. Start a chat on Z.ai to export.',
+        false
+      );
+    }
   } catch (err) {
-    panelInstance.setStatus(err.message || t('errLocateFailed'), true, {
-      code: err.code || 'LOCATE_FAILED',
-      message: err.message
-    });
+    if (err.code === 'LOCATE_FAILED') {
+      panelInstance.setStatus('No conversation detected on page. Open a chat to export.', false);
+    } else {
+      panelInstance.setStatus(err.message || t('errLocateFailed'), true, {
+        code: err.code || 'LOCATE_FAILED',
+        message: err.message
+      });
+    }
   }
 }
 
@@ -190,6 +209,14 @@ async function handleExport(options) {
       includeArtifacts: options.includeArtifacts,
       includeCitations: options.includeCitations
     });
+
+    if (
+      !conversation ||
+      !Array.isArray(conversation.messages) ||
+      conversation.messages.length === 0
+    ) {
+      throw new Error(t('errNoConversation'));
+    }
 
     if (options.title) {
       conversation.title = options.title;
@@ -292,6 +319,66 @@ async function handleExport(options) {
 }
 
 /**
+ * Handles markdown copy to clipboard with fallback extraction.
+ */
+async function handleCopyMd(options) {
+  try {
+    panelInstance.setStatus('Copying Markdown...');
+    let conversation = panelInstance.getActiveConversation?.();
+    if (
+      !conversation ||
+      !Array.isArray(conversation.messages) ||
+      conversation.messages.length === 0
+    ) {
+      conversation = await scrapeConversation({
+        range: options.range,
+        selectedIndices: options.selectedIndices,
+        includeThinking: options.includeThinking,
+        includeArtifacts: options.includeArtifacts,
+        includeCitations: options.includeCitations,
+        quick: false
+      });
+      if (conversation) {
+        panelInstance.setConversationData(conversation);
+      }
+    }
+
+    if (
+      !conversation ||
+      !Array.isArray(conversation.messages) ||
+      conversation.messages.length === 0
+    ) {
+      panelInstance.setStatus('No messages to copy. Open a chat first.', true);
+      return;
+    }
+
+    const { markdownExporter } = await import('../exporters/markdown.js');
+    const mdRes = await markdownExporter.exportConversation(conversation, {
+      preset: options.preset || 'github',
+      includeThinking: options.includeThinking,
+      includeArtifacts: options.includeArtifacts,
+      includeCitations: options.includeCitations
+    });
+
+    const text =
+      typeof mdRes.previewText === 'string'
+        ? mdRes.previewText
+        : typeof mdRes.blob?.text === 'function'
+          ? await mdRes.blob.text()
+          : '';
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      panelInstance.setStatus('✓ Markdown copied to clipboard!');
+      setTimeout(() => panelInstance.setStatus(''), 2000);
+    } else {
+      panelInstance.setStatus('Clipboard writing is not supported in this browser.', true);
+    }
+  } catch (err) {
+    panelInstance.setStatus(err.message || 'Copy error', true);
+  }
+}
+
+/**
  * Handles preview modal invocation.
  */
 async function handlePreview(options) {
@@ -299,22 +386,49 @@ async function handlePreview(options) {
   isPreviewing = true;
   try {
     panelInstance.setStatus('Generating preview...');
-    const conversation = await scrapeConversation({
-      range: options.range,
-      selectedIndices: options.selectedIndices,
-      includeThinking: options.includeThinking,
-      includeArtifacts: options.includeArtifacts,
-      includeCitations: options.includeCitations
-    });
+    let conversation = panelInstance.getActiveConversation?.();
+    if (
+      !conversation ||
+      !Array.isArray(conversation.messages) ||
+      conversation.messages.length === 0
+    ) {
+      conversation = await scrapeConversation({
+        range: options.range,
+        selectedIndices: options.selectedIndices,
+        includeThinking: options.includeThinking,
+        includeArtifacts: options.includeArtifacts,
+        includeCitations: options.includeCitations,
+        quick: true
+      });
+      if (conversation) {
+        panelInstance.setConversationData(conversation);
+      }
+    }
 
-    const response = await chrome.runtime.sendMessage({
-      type: 'OPEN_PREVIEW_REQUEST',
-      format: options.format,
-      engine: options.engine,
-      preset: options.preset,
-      conversation,
-      options
-    });
+    if (
+      !conversation ||
+      !Array.isArray(conversation.messages) ||
+      conversation.messages.length === 0
+    ) {
+      throw new Error(t('errNoConversation'));
+    }
+
+    let response = null;
+    try {
+      response = await Promise.race([
+        chrome.runtime.sendMessage({
+          type: 'OPEN_PREVIEW_REQUEST',
+          format: options.format,
+          engine: options.engine,
+          preset: options.preset,
+          conversation,
+          options
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('PREVIEW_TIMEOUT')), 10000))
+      ]);
+    } catch {
+      // background unavailable or timed out — will proceed to in-page preview fallback below
+    }
 
     panelInstance.setStatus('');
     if (response?.ok) {
@@ -325,7 +439,15 @@ async function handlePreview(options) {
         previewText: response.data.previewText
       });
     } else {
-      panelInstance.setStatus(response?.error?.message || 'Preview generation failed', true);
+      // Direct in-page preview generation fallback
+      const { markdownExporter } = await import('../exporters/markdown.js');
+      const mdRes = await markdownExporter.exportConversation(conversation, options);
+      const text = await mdRes.blob.text();
+      previewModalInstance.show({
+        title: conversation.title,
+        format: options.format,
+        previewText: text
+      });
     }
   } catch (err) {
     if (err?.message?.includes('Extension context invalidated')) {

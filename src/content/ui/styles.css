@@ -119,8 +119,13 @@
   transition: opacity 0.2s ease;
 }
 
+.zaix-panel-overlay.zaix-submodal-overlay {
+  z-index: 2147483648;
+}
+
 .zaix-panel-overlay.hidden {
-  display: none;
+  display: none !important;
+  pointer-events: none !important;
 }
 
 /* Main Panel Dialog */

@@ -17,7 +17,7 @@
  */
 export function createHistoryDrawer({ onClose, onReDownload }) {
   const overlay = document.createElement('div');
-  overlay.className = 'zaix-panel-overlay hidden';
+  overlay.className = 'zaix-panel-overlay zaix-submodal-overlay hidden';
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
   overlay.setAttribute('aria-label', 'Export History');

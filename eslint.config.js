@@ -29,6 +29,8 @@ export default [
         confirm: 'readonly',
         alert: 'readonly',
         Event: 'readonly',
+        MouseEvent: 'readonly',
+        KeyboardEvent: 'readonly',
         DOMParser: 'readonly',
         __dirname: 'readonly',
         process: 'readonly',

@@ -16,6 +16,7 @@ import * as markdownExporter from '../../exporters/markdown.js';
  * @param {Function} props.onHistory - Opens history drawer
  * @param {Function} props.onClose - Closes the panel
  * @param {Function} [props.onThemeChange] - Handles theme changes
+ * @param {Function} [props.onCopyMd] - Handles markdown copy when conversation needs scraping
  * @returns {{
  *   element: HTMLElement,
  *   updateStats: (stats: Object) => void,
@@ -23,10 +24,11 @@ import * as markdownExporter from '../../exporters/markdown.js';
  *   setStatus: (status: string, isError?: boolean, diagnostics?: Object) => void,
  *   setStreaming: (isStreaming: boolean) => void,
  *   getOptions: () => Object,
+ *   getActiveConversation: () => Object|null,
  *   setTheme: (theme: string) => void
  * }}
  */
-export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeChange }) {
+export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeChange, onCopyMd }) {
   const overlay = document.createElement('div');
   overlay.className = 'zaix-panel-overlay hidden';
   overlay.setAttribute('role', 'dialog');
@@ -490,10 +492,19 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
   // Copy Clean Markdown to Clipboard
   if (copyMdBtn) {
     copyMdBtn.addEventListener('click', async () => {
-      if (!activeConversation) return;
       try {
+        let conv = activeConversation;
+        if (!conv || !Array.isArray(conv.messages) || conv.messages.length === 0) {
+          if (typeof onCopyMd === 'function') {
+            await onCopyMd(getOptions());
+            return;
+          }
+          setStatus('No active conversation to copy. Please open a chat first.', true);
+          return;
+        }
+
         const opts = getOptions();
-        let targetMessages = activeConversation.messages || [];
+        let targetMessages = conv.messages || [];
 
         if (opts.selectedIndices && Array.isArray(opts.selectedIndices)) {
           const s = new Set(opts.selectedIndices);
@@ -501,7 +512,7 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
         }
 
         const convClone = {
-          ...activeConversation,
+          ...conv,
           messages: targetMessages
         };
 
@@ -512,19 +523,29 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
           includeCitations: opts.includeCitations
         });
 
-        const text = await mdRes.blob.text();
+        const text =
+          typeof mdRes.previewText === 'string'
+            ? mdRes.previewText
+            : typeof mdRes.blob?.text === 'function'
+              ? await mdRes.blob.text()
+              : '';
         if (navigator.clipboard?.writeText) {
           await navigator.clipboard.writeText(text);
           const origText = copyMdBtn.textContent;
           copyMdBtn.textContent = '✓ Copied!';
           copyMdBtn.style.color = '#10b981';
+          setStatus('✓ Markdown copied to clipboard!');
           setTimeout(() => {
             copyMdBtn.textContent = origText;
             copyMdBtn.style.color = '';
+            setStatus('');
           }, 2000);
+        } else {
+          setStatus('Clipboard writing is not supported in this browser.', true);
         }
       } catch (err) {
         console.error('[Panel] Copy Markdown error:', err);
+        setStatus(err.message || 'Failed to copy Markdown', true);
       }
     });
   }
@@ -603,7 +624,7 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
     }
     if (Array.isArray(conv.messages)) {
       customMessagesContainer.innerHTML = '';
-      conv.messages.forEach((m) => {
+      conv.messages.forEach((m, idx) => {
         const row = document.createElement('label');
         row.className = 'zaix-checkbox-label zaix-turn-row';
         row.setAttribute('data-role', m.role || 'assistant');
@@ -612,11 +633,12 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
 
         const snippet = (m.text || '').substring(0, 60).replace(/\n/g, ' ');
         const roleIcon = m.role === 'user' ? '👤' : '🤖';
+        const msgIndex = typeof m.index === 'number' ? m.index : idx;
 
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.className = 'zaix-turn-cb';
-        cb.setAttribute('data-index', String(m.index));
+        cb.setAttribute('data-index', String(msgIndex));
         cb.checked = true;
         cb.addEventListener('change', updateTurnCounter);
 
@@ -624,7 +646,7 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
         textSpan.style.cssText =
           'overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;';
         const strong = document.createElement('strong');
-        strong.textContent = `${roleIcon} #${m.index + 1}: `;
+        strong.textContent = `${roleIcon} #${msgIndex + 1}: `;
         textSpan.appendChild(strong);
         textSpan.appendChild(document.createTextNode(`${snippet}...`));
 
@@ -738,6 +760,7 @@ export function createPanel({ onExport, onPreview, onHistory, onClose, onThemeCh
     setStatus,
     setStreaming,
     getOptions,
+    getActiveConversation: () => activeConversation,
     setTheme: updateThemeDisplay
   };
 }

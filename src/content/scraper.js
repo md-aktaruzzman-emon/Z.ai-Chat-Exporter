@@ -78,6 +78,18 @@ export function classifyRole(el, index = 0) {
   if (className.includes('tool')) return 'tool';
   if (className.includes('system')) return 'system';
 
+  // 3b. Inner component heuristics for Svelte 5 turn containers
+  if (el.querySelector?.('.user-message, [class*="user-message" i], [class*="chat-user" i]')) {
+    return 'user';
+  }
+  if (
+    el.querySelector?.(
+      '.markdown-prose, #response-content-container, .chat-assistant, [class*="assistant-message" i], [class*="chat-assistant" i]'
+    )
+  ) {
+    return 'assistant';
+  }
+
   // 4. Check author badge, avatar, or name inside bubble
   const authorBadge = el.querySelector(
     '[class*="author" i], [class*="name" i], [class*="sender" i], [class*="user" i], [class*="avatar" i], img, svg'
@@ -1093,39 +1105,45 @@ export function extractConversationId(
   url = typeof window !== 'undefined' ? window.location.href : '',
   doc = typeof document !== 'undefined' ? document : null
 ) {
-  if (!url) return null;
+  const targetUrl = url || (typeof window !== 'undefined' ? window.location?.href || '' : '');
+  if (targetUrl) {
+    try {
+      const parsed = new URL(targetUrl, 'https://chat.z.ai');
+      const path = parsed.pathname;
 
-  try {
-    const parsed = new URL(url, 'https://chat.z.ai');
-    const path = parsed.pathname;
+      // 1. Pathname patterns: /c/<id>, /s/<id>, /chat/<id>, /conversation/<id>, /agent/<id>, /task/<id>
+      const pathMatch = path.match(
+        /\/(?:c|s|chat|chats|conversation|agent|task|session)\/([a-zA-Z0-9_\-]+)/i
+      );
+      if (pathMatch && pathMatch[1]) {
+        return pathMatch[1];
+      }
 
-    // 1. Pathname patterns: /c/<id>, /s/<id>, /chat/<id>, /conversation/<id>, /agent/<id>, /task/<id>
-    const pathMatch = path.match(
-      /\/(?:c|s|chat|chats|conversation|agent|task|session)\/([a-zA-Z0-9_\-]+)/i
-    );
-    if (pathMatch && pathMatch[1]) {
-      return pathMatch[1];
+      // 2. Query parameter patterns: ?c=<id>, ?id=<id>, ?chatId=<id>, ?chat_id=<id>, ?shareId=<id>
+      const searchParams = parsed.searchParams;
+      const qId =
+        searchParams.get('c') ||
+        searchParams.get('id') ||
+        searchParams.get('chatId') ||
+        searchParams.get('chat_id') ||
+        searchParams.get('conversationId') ||
+        searchParams.get('conversation_id') ||
+        searchParams.get('shareId') ||
+        searchParams.get('share_id') ||
+        searchParams.get('task_id') ||
+        searchParams.get('taskId');
+      if (qId && /^[a-zA-Z0-9_\-]+$/.test(qId)) {
+        return qId;
+      }
+    } catch {
+      // ignore URL parsing error
     }
-
-    // 2. Query parameter patterns: ?c=<id>, ?id=<id>, ?chatId=<id>, ?shareId=<id>
-    const searchParams = parsed.searchParams;
-    const qId =
-      searchParams.get('c') ||
-      searchParams.get('id') ||
-      searchParams.get('chatId') ||
-      searchParams.get('conversationId') ||
-      searchParams.get('shareId') ||
-      searchParams.get('share_id');
-    if (qId && /^[a-zA-Z0-9_\-]+$/.test(qId)) {
-      return qId;
-    }
-  } catch {
-    // ignore URL parsing error
   }
 
   // 3. Inspect DOM attributes if document is available
-  if (doc) {
-    const el = doc.querySelector(
+  const docToUse = doc || (typeof document !== 'undefined' ? document : null);
+  if (docToUse) {
+    const el = docToUse.querySelector(
       '[data-conversation-id], [data-chat-id], meta[name="conversation-id"]'
     );
     const id =
@@ -1137,13 +1155,37 @@ export function extractConversationId(
     }
 
     // Check active chat anchor in sidebar
-    const activeLink = doc.querySelector(
-      'a[href*="/c/"][class*="active" i], a[href*="/c/"][class*="selected" i], a[href*="/c/"][aria-selected="true"], a[href*="/c/"][aria-current]'
+    const activeLink = docToUse.querySelector(
+      'a[href*="/c/"][class*="active" i], a[href*="/c/"][class*="selected" i], a[href*="/c/"][aria-selected="true"], a[href*="/c/"][aria-current], a[href*="/c/"][class*="bg-"]'
     );
     if (activeLink) {
       const href = activeLink.getAttribute('href') || '';
       const m = href.match(/\/c\/([a-zA-Z0-9_\-]+)/i);
       if (m && m[1]) return m[1];
+    }
+
+    // Check active element with data-id
+    const activeItem = docToUse.querySelector(
+      '[class*="active" i][data-id], [class*="selected" i][data-id], [aria-selected="true"][data-id]'
+    );
+    if (activeItem) {
+      const aId = activeItem.getAttribute('data-id');
+      if (aId && /^[a-zA-Z0-9_\-]+$/.test(aId)) return aId;
+    }
+  }
+
+  // 4. Inspect localStorage for common active chat ID keys
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const candidateKeys = ['chatId', 'currentChatId', 'selectedChatId', 'activeChatId'];
+      for (const k of candidateKeys) {
+        const val = window.localStorage.getItem(k);
+        if (val && /^[a-zA-Z0-9_\-]+$/.test(val) && val.length > 5) {
+          return val;
+        }
+      }
+    } catch {
+      // ignore
     }
   }
 
@@ -1170,9 +1212,26 @@ export async function fetchConversationFromApi(conversationId, options = {}) {
         (typeof globalThis !== 'undefined' && globalThis.localStorage) ||
         null;
       if (storage) {
-        const localToken = storage.getItem('token') || storage.getItem('z_ai_session_t') || '';
-        if (localToken && localToken !== 'undefined' && localToken !== 'null') {
-          authToken = localToken.replace(/^Bearer\s+/i, '').trim();
+        const candidateKeys = ['token', 'z_ai_session_t', 'access_token', 'auth_token', 'jwt'];
+        for (const k of candidateKeys) {
+          const val = storage.getItem(k);
+          if (val && val !== 'undefined' && val !== 'null') {
+            authToken = val.replace(/^Bearer\s+/i, '').trim();
+            break;
+          }
+        }
+        if (!authToken) {
+          const userStr = storage.getItem('user');
+          if (userStr) {
+            try {
+              const u = JSON.parse(userStr);
+              if (u?.token || u?.access_token) {
+                authToken = (u.token || u.access_token).replace(/^Bearer\s+/i, '').trim();
+              }
+            } catch {
+              // ignore json parse
+            }
+          }
         }
       }
       if (!authToken) {
@@ -1181,7 +1240,7 @@ export async function fetchConversationFromApi(conversationId, options = {}) {
           (typeof globalThis !== 'undefined' && globalThis.sessionStorage) ||
           null;
         if (sStorage) {
-          const sessionToken = sStorage.getItem('token') || '';
+          const sessionToken = sStorage.getItem('token') || sStorage.getItem('access_token') || '';
           if (sessionToken && sessionToken !== 'undefined' && sessionToken !== 'null') {
             authToken = sessionToken.replace(/^Bearer\s+/i, '').trim();
           }
@@ -1192,6 +1251,63 @@ export async function fetchConversationFromApi(conversationId, options = {}) {
     }
   }
 
+  /**
+   * Hydrates full message bodies via Z.ai batch retrieval endpoint.
+   * Handles both object dictionary responses ({ data: { [id]: msg } }) and array responses.
+   * @param {string} conversationId
+   * @param {string[]} messageIds
+   * @param {string} authToken
+   * @returns {Promise<Record<string, Object>>}
+   */
+  async function fetchBatchMessageBodies(conversationId, messageIds, authToken) {
+    if (!conversationId || !Array.isArray(messageIds) || messageIds.length === 0) {
+      return {};
+    }
+
+    const batchMap = {};
+    const CHUNK_SIZE = 50;
+
+    for (let i = 0; i < messageIds.length; i += CHUNK_SIZE) {
+      const chunkIds = messageIds.slice(i, i + CHUNK_SIZE);
+      const candidateBatchUrls = [
+        `/api/v1/chats/${conversationId}/messages/batch`,
+        `/chats/${conversationId}/messages/batch`
+      ];
+
+      for (const bUrl of candidateBatchUrls) {
+        try {
+          const batchRes = await fetch(bUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+              ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
+            },
+            credentials: 'include',
+            body: JSON.stringify({ ids: chunkIds, message_ids: chunkIds })
+          });
+
+          if (batchRes.ok) {
+            const batchData = await batchRes.json();
+            const payload = batchData?.data || batchData?.messages || batchData;
+            if (Array.isArray(payload)) {
+              payload.forEach((item) => {
+                if (item && item.id) batchMap[item.id] = item;
+              });
+            } else if (payload && typeof payload === 'object') {
+              Object.assign(batchMap, payload);
+            }
+            break; // successfully retrieved chunk
+          }
+        } catch {
+          // try next candidate endpoint
+        }
+      }
+    }
+
+    return batchMap;
+  }
+
   // 2. Detect if route is a shared chat link
   const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
   const isShareUrl = /\/s\/[a-zA-Z0-9_\-]+/i.test(currentUrl);
@@ -1200,11 +1316,14 @@ export async function fetchConversationFromApi(conversationId, options = {}) {
     ? [
         `/api/v1/chats/share/${conversationId}`,
         `/api/chats/share/${conversationId}`,
+        `/chats/share/${conversationId}`,
         `/api/v1/chats/${conversationId}`,
-        `/api/chats/${conversationId}`
+        `/api/chats/${conversationId}`,
+        `/chats/${conversationId}`
       ]
     : [
         `/api/v1/chats/${conversationId}`,
+        `/chats/${conversationId}`,
         `/api/v1/chats/share/${conversationId}`,
         `/api/agent/v1/chats/${conversationId}`,
         `/api/chats/${conversationId}`,
@@ -1278,31 +1397,40 @@ export async function fetchConversationFromApi(conversationId, options = {}) {
           (data.chat_messages ? Object.values(data.chat_messages) : null);
       }
 
-      // 5. If message IDs list returned, attempt batch retrieval
+      // 5. If messages lack content or content_blocks, or if only IDs were returned, hydrate via batch
+      const needsHydration =
+        Array.isArray(rawMessages) &&
+        rawMessages.length > 0 &&
+        rawMessages.some(
+          (m) =>
+            (!m.content || (typeof m.content === 'string' && m.content.trim() === '')) &&
+            (!m.content_blocks || m.content_blocks.length === 0)
+        );
+
+      if (needsHydration) {
+        const idsToFetch = rawMessages.map((m) => m.id).filter(Boolean);
+        if (idsToFetch.length > 0) {
+          const batchMap = await fetchBatchMessageBodies(conversationId, idsToFetch, authToken);
+          rawMessages = rawMessages.map((m) => {
+            if (m.id && batchMap[m.id]) {
+              return { ...m, ...batchMap[m.id] };
+            }
+            return m;
+          });
+        }
+      }
+
+      // If rawMessages was not found or is empty, try message_ids list
       const messageIds = data.message_ids || chatObj?.message_ids || null;
       if (
         (!rawMessages || rawMessages.length === 0) &&
         Array.isArray(messageIds) &&
         messageIds.length > 0
       ) {
-        try {
-          const batchRes = await fetch(`/api/v1/chats/${conversationId}/messages/batch`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Accept: 'application/json',
-              ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
-            },
-            credentials: 'include',
-            body: JSON.stringify({ ids: messageIds, message_ids: messageIds })
-          });
-          if (batchRes.ok) {
-            const batchData = await batchRes.json();
-            rawMessages = batchData.messages || batchData.data || batchData;
-          }
-        } catch {
-          // ignore batch fetch error
-        }
+        const batchMap = await fetchBatchMessageBodies(conversationId, messageIds, authToken);
+        rawMessages = messageIds
+          .map((id) => batchMap[id])
+          .filter((m) => m && (m.content || m.content_blocks));
       }
 
       if (!Array.isArray(rawMessages) || rawMessages.length === 0) continue;
@@ -1681,7 +1809,8 @@ export async function scrapeConversation(options = {}) {
     includeArtifacts = true,
     includeCitations = true,
     waitForStream = true,
-    forceDom = false
+    forceDom = false,
+    quick = false
   } = options;
 
   // Section 6 & 7: Prefer authenticated API data over virtualized DOM
@@ -1744,13 +1873,19 @@ export async function scrapeConversation(options = {}) {
 
   // Use FullConversationCollector to traverse virtualized DOM list & accumulate complete chat
   const collector = new FullConversationCollector(options);
-  const rawMessages = await collector.collectAll(loc.threadContainer, {
-    maxScrollAttempts: 30,
-    settleDelayMs: 200,
-    includeThinking,
-    includeArtifacts,
-    includeCitations
-  });
+  let rawMessages = [];
+  if (quick) {
+    collector.collectMountedBubbles(options);
+    rawMessages = collector.getOrderedMessages();
+  } else {
+    rawMessages = await collector.collectAll(loc.threadContainer, {
+      maxScrollAttempts: 30,
+      settleDelayMs: 200,
+      includeThinking,
+      includeArtifacts,
+      includeCitations
+    });
+  }
 
   if (rawMessages.length === 0) {
     throw new ExportError(

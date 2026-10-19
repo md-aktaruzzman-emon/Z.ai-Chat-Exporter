@@ -125,9 +125,15 @@ export const THREAD_CANDIDATES = [
 
 export const MESSAGE_CANDIDATES = [
   // Modern Z.ai Svelte 5 / Open WebUI turn pairs
+  '#messages-container .user-message, #messages-container #response-content-container, #messages-container .chat-assistant, #messages-container .assistant-message, #messages-container .chat-user',
   '.user-message, #response-content-container, .chat-assistant, .assistant-message',
   'div.user-message, div#response-content-container, div.chat-user, div.chat-assistant, div.assistant-message',
+  '#messages-container .markdown-prose, #messages-container .user-message',
   '.user-message, .markdown-prose',
+  '#messages-container > div > div.group',
+  '#messages-container div.group',
+  '#messages-container [class*="group"]',
+  'div.group:has(.markdown-prose, pre, [class*="prose"])',
   'div[id^="message-"]',
   '[id^="message-"]',
   '[data-message-id]',
@@ -197,6 +203,14 @@ let activeSavedProfile = null;
 function scoreThreadCandidate(el) {
   if (!el || typeof el.getBoundingClientRect !== 'function') return -1;
   if (el.id === 'zaix-extension-root' || el.closest?.('#zaix-extension-root')) return -1;
+
+  // Penalize sidebars, navigation drawers, or chat history sidebars
+  if (
+    el.closest?.('aside, nav, [class*="sidebar" i], #sidebar') ||
+    ['ASIDE', 'NAV'].includes(el.tagName)
+  ) {
+    return -1;
+  }
 
   // Specific Open WebUI container match
   if (el.id === 'messages-container' || el.id === 'chat-container') {

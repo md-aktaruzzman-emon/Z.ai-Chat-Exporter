@@ -473,4 +473,93 @@ Final paragraph.
       document.body.removeChild(mockContainer);
     }
   });
+
+  it('hydrates message bodies via batch endpoint when history tree messages lack content', async () => {
+    const storageSpy = vi
+      .spyOn(globalThis.Storage.prototype, 'getItem')
+      .mockImplementation((key) => {
+        if (key === 'token') return 'test_batch_token';
+        return null;
+      });
+
+    // Chat endpoint returns tree stubs WITHOUT text content
+    const mockTreeStubsResponse = {
+      chat: {
+        title: 'Lazy Loaded Chat',
+        model: 'GLM-5.3-Flash',
+        history: {
+          currentId: 'stub-2',
+          messages: {
+            'stub-1': { id: 'stub-1', parentId: null, role: 'user' },
+            'stub-2': { id: 'stub-2', parentId: 'stub-1', role: 'assistant' }
+          }
+        }
+      }
+    };
+
+    // Batch endpoint returns dictionary payload (exact Z.ai production format)
+    const mockBatchResponse = {
+      data: {
+        'stub-1': {
+          id: 'stub-1',
+          role: 'user',
+          content: 'User query needing hydration'
+        },
+        'stub-2': {
+          id: 'stub-2',
+          role: 'assistant',
+          content: 'Full hydrated assistant response body.\n\n```js\nconsole.log(true);\n```'
+        }
+      }
+    };
+
+    let batchCalled = false;
+    let batchPayload = null;
+
+    globalThis.fetch = vi.fn().mockImplementation((url, init) => {
+      if (url.includes('/messages/batch')) {
+        batchCalled = true;
+        batchPayload = JSON.parse(init.body);
+        return Promise.resolve({
+          ok: true,
+          json: async () => mockBatchResponse
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => mockTreeStubsResponse
+      });
+    });
+
+    try {
+      const conv = await fetchConversationFromApi('conv-lazy-load');
+      expect(conv).toBeDefined();
+      expect(batchCalled).toBe(true);
+      expect(batchPayload.ids).toEqual(['stub-1', 'stub-2']);
+      expect(conv.messages.length).toBe(2);
+      expect(conv.messages[0].text).toBe('User query needing hydration');
+      expect(conv.messages[1].text).toContain('Full hydrated assistant response body');
+      expect(conv.messages[1].blocks.some((b) => b.kind === 'code')).toBe(true);
+    } finally {
+      storageSpy.mockRestore();
+    }
+  });
+
+  it('extractConversationId correctly handles folder nested routes and task query parameters', () => {
+    // Nested folder /c/ route
+    expect(extractConversationId('https://chat.z.ai/folder/my-folder/c/chat-uuid-123')).toBe(
+      'chat-uuid-123'
+    );
+
+    // chat_id query parameter
+    expect(extractConversationId('https://chat.z.ai/?chat_id=query-chat-456')).toBe(
+      'query-chat-456'
+    );
+
+    // task_id / taskId query parameters
+    expect(extractConversationId('https://chat.z.ai/?task_id=task-uuid-789')).toBe('task-uuid-789');
+    expect(extractConversationId('https://chat.z.ai/?taskId=task-camel-999')).toBe(
+      'task-camel-999'
+    );
+  });
 });
